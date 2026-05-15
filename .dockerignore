@@ -1,0 +1,26 @@
+# Keep build context small — most of these aren't needed inside containers.
+.git
+.venv
+.uv
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.coverage
+htmlcov
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+
+# Frontend assets are built/run separately
+frontend/node_modules
+frontend/dist
+frontend/.vite
+
+# Demos / docs are mounted as volumes where needed, not baked into images
+docs
+
+# OS / editor noise
+.DS_Store
+.vscode
+.idea

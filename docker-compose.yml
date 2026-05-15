@@ -1,0 +1,186 @@
+# AXON local orchestration.
+# Most layer services still run the shared FastAPI shell from
+# services/_template/ — each will be replaced with its real implementation
+# in subsequent build prompts. `sensing` (Prompt 2) is the first real layer:
+# it builds from its own Dockerfile and depends on Redis + mosquitto.
+
+x-template: &template
+  build:
+    context: .
+    dockerfile: services/_template/Dockerfile
+  restart: unless-stopped
+
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: axon-redis
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    # 6380 on the host to avoid colliding with other local redis instances;
+    # service-to-service inside the compose network still uses redis:6379.
+    ports:
+      - "6380:6379"
+    restart: unless-stopped
+
+  mosquitto:
+    image: eclipse-mosquitto:2
+    container_name: axon-mosquitto
+    volumes:
+      - ./infra/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+    ports:
+      - "1883:1883"
+    restart: unless-stopped
+
+  sensing:
+    build:
+      context: .
+      dockerfile: services/sensing/Dockerfile
+    container_name: axon-sensing
+    environment:
+      AXON_SERVICE_NAME: sensing
+      AXON_REDIS_URL: redis://redis:6379/0
+      AXON_MQTT_HOST: mosquitto
+      AXON_MQTT_PORT: "1883"
+      AXON_SCENARIO_PATH: /srv/demos/mock_data/scenarios/${SCENARIO:-mock_idle}.yaml
+    volumes:
+      - ./demos:/srv/demos:ro
+    depends_on:
+      - redis
+      - mosquitto
+    ports:
+      - "8001:8000"
+    restart: unless-stopped
+
+  slice_control_mock:
+    build:
+      context: .
+      dockerfile: services/slice_control_mock/Dockerfile
+    container_name: axon-slice-control-mock
+    ports:
+      - "8002:8000"
+    restart: unless-stopped
+
+  actuators_mock:
+    build:
+      context: .
+      dockerfile: services/actuators_mock/Dockerfile
+    container_name: axon-actuators-mock
+    ports:
+      - "8009:8000"
+    restart: unless-stopped
+
+  vision:
+    build:
+      context: .
+      dockerfile: services/vision/Dockerfile
+    container_name: axon-vision
+    environment:
+      AXON_SERVICE_NAME: vision
+      AXON_REDIS_URL: redis://redis:6379/0
+      AXON_SCENARIO_PATH: /srv/demos/mock_data/scenarios/${SCENARIO:-mock_idle}.yaml
+      AXON_ONNX_PROVIDER: ${AXON_ONNX_PROVIDER:-cpu}
+    volumes:
+      - ./demos:/srv/demos:ro
+    depends_on:
+      - redis
+      - sensing
+    ports:
+      - "8003:8000"
+    restart: unless-stopped
+
+  fusion:
+    build:
+      context: .
+      dockerfile: services/fusion/Dockerfile
+    container_name: axon-fusion
+    environment:
+      AXON_SERVICE_NAME: fusion
+      AXON_REDIS_URL: redis://redis:6379/0
+      AXON_SCENARIO_PATH: /srv/demos/mock_data/scenarios/${SCENARIO:-mock_idle}.yaml
+      # Latency harness override (`make latency-measure`). Empty when
+      # unset → fusion uses the rules.yaml cooldown.
+      AXON_COOLDOWN_OVERRIDE_SECONDS: ${AXON_COOLDOWN_OVERRIDE_SECONDS:-}
+    volumes:
+      - ./demos:/srv/demos:ro
+      # Bind-mount rules.yaml so PUT /rules from the console takes effect
+      # on the next fusion restart.
+      - ./services/fusion/rules.yaml:/srv/rules.yaml:ro
+    depends_on:
+      - redis
+      - sensing
+      - vision
+    ports:
+      - "8004:8000"
+    restart: unless-stopped
+
+  vlm:
+    build:
+      context: .
+      dockerfile: services/vlm/Dockerfile
+    container_name: axon-vlm
+    environment:
+      AXON_SERVICE_NAME: vlm
+      AXON_REDIS_URL: redis://redis:6379/0
+      AXON_VLM_MODE: ${AXON_VLM_MODE:-stub}
+      AXON_VLM_URL: ${AXON_VLM_URL:-http://vllm-server:8000/v1}
+    depends_on:
+      - redis
+      - fusion
+    ports:
+      - "8005:8000"
+    restart: unless-stopped
+
+  agent:
+    build:
+      context: .
+      dockerfile: services/agent/Dockerfile
+    container_name: axon-agent
+    environment:
+      AXON_SERVICE_NAME: agent
+      AXON_REDIS_URL: redis://redis:6379/0
+      AXON_LLM_MODE: ${AXON_LLM_MODE:-stub}
+      AXON_LLM_URL: ${AXON_LLM_URL:-http://vllm-llm:8000/v1}
+    depends_on:
+      - redis
+      - vlm
+    ports:
+      - "8006:8000"
+    restart: unless-stopped
+
+  action:
+    build:
+      context: .
+      dockerfile: services/action/Dockerfile
+    container_name: axon-action
+    environment:
+      AXON_SERVICE_NAME: action
+      AXON_REDIS_URL: redis://redis:6379/0
+      AXON_ACTUATORS_URL: http://axon-actuators-mock:8000
+      AXON_SLICE_CONTROL_URL: http://axon-slice-control-mock:8000
+    depends_on:
+      - redis
+      - actuators_mock
+      - slice_control_mock
+      - agent
+    ports:
+      - "8007:8000"
+    restart: unless-stopped
+
+  console_api:
+    build:
+      context: .
+      dockerfile: services/console_api/Dockerfile
+    container_name: axon-console-api
+    environment:
+      AXON_SERVICE_NAME: console_api
+      AXON_REDIS_URL: redis://redis:6379/0
+      AXON_RULES_PATH: /srv/config/fusion_rules.yaml
+      AXON_SQLITE_PATH: /srv/data/console.db
+    volumes:
+      - ./services/fusion/rules.yaml:/srv/config/fusion_rules.yaml:rw
+      - ./infra/console_data:/srv/data
+    depends_on:
+      - redis
+      - action
+    ports:
+      - "8008:8000"
+    restart: unless-stopped

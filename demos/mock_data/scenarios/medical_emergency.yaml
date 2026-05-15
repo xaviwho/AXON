@@ -1,0 +1,31 @@
+name: medical_emergency
+description: |
+  60 seconds: an actor stands in the lab for 15 s, then collapses near the
+  chemical cabinet. The orchestrator (demos/scenarios/medical_emergency.py)
+  injects prone PoseObservations onto axon:poses starting at t=15 s; the
+  fusion service's `person_prone_persistent` rule fires at t≈20 s after
+  five continuous seconds of prone observations.
+
+  Sensors stay quiet — this scenario isolates the pose-driven gating path.
+  The vision pipeline still runs on the camera (and continues to detect
+  "person standing" on the baked-in still photo), but the prone signal is
+  what crosses the fusion threshold.
+duration_seconds: 60
+
+cameras:
+  - id: cam-01
+    kind: still_image
+    url: /srv/demos/mock_data/assets/zidane.jpg
+    fps: 15
+    width: 1280
+    height: 720
+
+sensors:
+  - id: gas-01
+    type: gas
+    topic: axon/sensors/lab-A/gas-01
+    unit: ppm
+  - id: thermal-01
+    type: thermal
+    topic: axon/sensors/lab-A/thermal-01
+    unit: degC

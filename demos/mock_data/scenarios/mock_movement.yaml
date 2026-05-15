@@ -1,0 +1,28 @@
+name: mock_movement
+description: |
+  60 seconds of a camera replaying a baked-in still photograph that
+  contains a clearly-visible person. Used to verify the Layer A pipeline:
+  the vision service should consume frames, run YOLOv10 + MediaPipe, and
+  publish VisionDetection + PoseObservation messages onto the bus.
+
+  The still_image source is a dev-loop convenience — real footage will
+  replace it in the medical_emergency / fire_ignition scenarios (Prompt 9).
+duration_seconds: 60
+
+cameras:
+  - id: cam-01
+    kind: still_image
+    url: /srv/demos/mock_data/assets/zidane.jpg
+    fps: 15
+    width: 1280
+    height: 720
+
+sensors:
+  - id: gas-01
+    type: gas
+    topic: axon/sensors/lab-A/gas-01
+    unit: ppm
+  - id: thermal-01
+    type: thermal
+    topic: axon/sensors/lab-A/thermal-01
+    unit: degC

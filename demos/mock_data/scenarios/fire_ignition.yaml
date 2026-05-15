@@ -1,0 +1,39 @@
+name: fire_ignition
+description: |
+  60-second scenario: lab is calm for 10s, then a thermal sensor spikes to
+  80°C — a stand-in for the chemistry-lab "fire ignition" demo. The fusion
+  service's thermal_threshold rule (≥60°C, +0.6) should activate and emit
+  an AnomalyScore on axon:anomalies within 200ms of the spike landing on
+  the bus.
+
+  We continue to use the still-image camera so the orchestrator can also
+  verify that vision keeps producing per-frame detections during the
+  incident (Layer C will draw context from the trigger-cache frame_refs).
+duration_seconds: 60
+
+cameras:
+  - id: cam-01
+    kind: still_image
+    url: /srv/demos/mock_data/assets/zidane.jpg
+    fps: 15
+    width: 1280
+    height: 720
+
+sensors:
+  - id: gas-01
+    type: gas
+    topic: axon/sensors/lab-A/gas-01
+    unit: ppm
+    # gas stays calm for this scenario; thermal carries the trigger
+  - id: thermal-01
+    type: thermal
+    topic: axon/sensors/lab-A/thermal-01
+    unit: degC
+    trace:
+      kind: spike
+      baseline: 22.0
+      noise: 0.3
+      spikes:
+        - at_seconds: 10.0
+          hold_seconds: 8.0
+          value: 80.0

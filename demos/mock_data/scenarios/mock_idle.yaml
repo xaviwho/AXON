@@ -1,0 +1,24 @@
+name: mock_idle
+description: |
+  60 seconds of an idle lab. One synthetic camera, two sensors (a calm gas
+  reading and a calm thermal reading). No anomalies — used to verify that
+  the sensing layer ingests cleanly and that downstream gating (Prompt 4)
+  stays quiet in steady state.
+duration_seconds: 60
+
+cameras:
+  - id: cam-01
+    kind: synthetic
+    fps: 15
+    width: 640
+    height: 360
+
+sensors:
+  - id: gas-01
+    type: gas
+    topic: axon/sensors/lab-A/gas-01
+    unit: ppm
+  - id: thermal-01
+    type: thermal
+    topic: axon/sensors/lab-A/thermal-01
+    unit: degC

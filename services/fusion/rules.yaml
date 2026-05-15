@@ -1,0 +1,46 @@
+# AXON Layer B fusion rules — MVP defaults.
+# Per Prompt 4: each rule contributes a weight; weights sum (capped at 1.0)
+# and any sum > trigger_threshold emits an AnomalyScore (gated by cooldown).
+
+trigger_threshold: 0.4
+emission_cooldown_seconds: 10.0
+window_seconds: 5.0
+
+rules:
+  - id: fire_smoke_vision
+    kind: vision_class
+    classes: [fire, smoke]
+    min_confidence: 0.6
+    contribution: 0.5
+    description: Fire or smoke detected by vision (post-fine-tune; until then thermal_threshold proxies it).
+
+  - id: person_prone_persistent
+    kind: prone_duration
+    min_duration_seconds: 5.0
+    contribution: 0.5
+    description: |
+      Person continuously prone for >5s — possible medical emergency. Weight
+      tuned so this signal triggers the gate on its own (Prompt 9 medical_emergency
+      scenario); compounds with sensor/vision evidence when both are present.
+
+  - id: gas_threshold
+    kind: sensor_threshold
+    sensor_type: gas
+    min_value: 25.0
+    contribution: 0.6
+    description: Gas reading above 25 ppm (placeholder; per-deployment lookup eventually).
+
+  - id: thermal_threshold
+    kind: sensor_threshold
+    sensor_type: thermal
+    min_value: 60.0
+    contribution: 0.6
+    description: Thermal reading above 60°C — fire proxy until vision fine-tune adds fire/smoke classes.
+
+  - id: ppe_with_equipment
+    kind: vision_class_pair
+    class_a: ppe_violation
+    class_b: equipment_in_use
+    min_confidence: 0.5
+    contribution: 0.3
+    description: PPE violation while equipment is in use — informational severity.

@@ -1,0 +1,162 @@
+{
+  "version": "1.0",
+  "description": "AXON bounded action library. Layer D selects and parameterizes from this set; it CANNOT synthesize new actions. Adding an entry requires design review.",
+  "actions": {
+    "power_cutoff": {
+      "action_id": "power_cutoff",
+      "description": "Cut electrical power to equipment in a zone.",
+      "parameters_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "zone_id": { "type": "string", "minLength": 1 },
+          "equipment_ids": {
+            "type": "array",
+            "items": { "type": "string", "minLength": 1 },
+            "minItems": 0
+          }
+        },
+        "required": ["zone_id"],
+        "additionalProperties": false
+      },
+      "latency_class": "URLLC",
+      "permission_level": "admin",
+      "audit_requirements": ["pre_state_snapshot", "operator_notification"]
+    },
+    "door_lock": {
+      "action_id": "door_lock",
+      "description": "Lock a door or seal a zone perimeter.",
+      "parameters_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "zone_id": { "type": "string", "minLength": 1 }
+        },
+        "required": ["zone_id"],
+        "additionalProperties": false
+      },
+      "latency_class": "URLLC",
+      "permission_level": "operator",
+      "audit_requirements": ["pre_state_snapshot"]
+    },
+    "door_unlock": {
+      "action_id": "door_unlock",
+      "description": "Unlock a door or open a zone perimeter, typically to admit responders.",
+      "parameters_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "zone_id": { "type": "string", "minLength": 1 }
+        },
+        "required": ["zone_id"],
+        "additionalProperties": false
+      },
+      "latency_class": "URLLC",
+      "permission_level": "operator",
+      "audit_requirements": ["pre_state_snapshot", "operator_notification"]
+    },
+    "hvac_isolate": {
+      "action_id": "hvac_isolate",
+      "description": "Isolate HVAC dampers to contain smoke, gas, or contamination in a zone.",
+      "parameters_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "zone_id": { "type": "string", "minLength": 1 }
+        },
+        "required": ["zone_id"],
+        "additionalProperties": false
+      },
+      "latency_class": "URLLC",
+      "permission_level": "admin",
+      "audit_requirements": ["pre_state_snapshot"]
+    },
+    "slice_reshape": {
+      "action_id": "slice_reshape",
+      "description": "Reconfigure HFR Ieum 5G+ slice priorities mid-incident. The novel agentic contribution: closes the loop from action layer back to connectivity.",
+      "parameters_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "slices": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "properties": {
+                "slice_id": { "type": "string", "enum": ["eMBB", "URLLC", "mMTC"] },
+                "priority": { "type": "integer", "minimum": 1, "maximum": 10 }
+              },
+              "required": ["slice_id", "priority"],
+              "additionalProperties": false
+            }
+          },
+          "duration_seconds": { "type": "integer", "minimum": 1, "maximum": 3600 }
+        },
+        "required": ["slices"],
+        "additionalProperties": false
+      },
+      "latency_class": "URLLC",
+      "permission_level": "system",
+      "audit_requirements": ["pre_state_snapshot", "operator_notification", "network_log_link"]
+    },
+    "notify_responders": {
+      "action_id": "notify_responders",
+      "description": "Alert designated responders (EHS, 119) with incident summary.",
+      "parameters_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "targets": {
+            "type": "array",
+            "minItems": 1,
+            "items": { "type": "string", "minLength": 1 }
+          },
+          "severity": { "type": "integer", "minimum": 0, "maximum": 5 },
+          "message": { "type": "string", "minLength": 1 }
+        },
+        "required": ["targets", "severity", "message"],
+        "additionalProperties": false
+      },
+      "latency_class": "eMBB",
+      "permission_level": "operator",
+      "audit_requirements": ["recipient_acknowledgement"]
+    },
+    "display_alert": {
+      "action_id": "display_alert",
+      "description": "Render a banner alert on the AXON Console.",
+      "parameters_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "severity": { "type": "integer", "minimum": 0, "maximum": 5 },
+          "message": { "type": "string", "minLength": 1 },
+          "zone_id": { "type": "string", "minLength": 1 }
+        },
+        "required": ["severity", "message"],
+        "additionalProperties": false
+      },
+      "latency_class": "eMBB",
+      "permission_level": "operator",
+      "audit_requirements": []
+    },
+    "video_stream_to_responder": {
+      "action_id": "video_stream_to_responder",
+      "description": "Open a live WebRTC video stream from a specific camera to a responder endpoint.",
+      "parameters_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "camera_id": { "type": "string", "minLength": 1 },
+          "responder_id": { "type": "string", "minLength": 1 },
+          "duration_seconds": { "type": "integer", "minimum": 1, "maximum": 3600 }
+        },
+        "required": ["camera_id", "responder_id"],
+        "additionalProperties": false
+      },
+      "latency_class": "eMBB",
+      "permission_level": "admin",
+      "audit_requirements": ["responder_session_id"]
+    }
+  }
+}
