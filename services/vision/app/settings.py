@@ -27,6 +27,14 @@ class VisionSettings(BaseSettings):
     # Execution provider preference; "auto" picks CUDA if available, else CPU.
     onnx_provider: str = "auto"
 
+    # Zero-shot detector for the classes YOLOv10 does not carry (fire, smoke,
+    # ppe_*, equipment_in_use). "off" (default) never loads the model;
+    # "on" activates OWL-ViTv2 alongside YOLOv10 on every frame.
+    zero_shot_mode: str = Field(default="off", pattern="^(off|on)$")
+    zero_shot_model: str = "google/owlv2-base-patch16-ensemble"
+    zero_shot_threshold: float = Field(default=0.15, ge=0.0, le=1.0)
+    zero_shot_device: str = "auto"
+
     metrics_port: int = 8000  # exposed on the FastAPI app as /metrics
 
 

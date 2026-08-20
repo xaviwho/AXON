@@ -1,0 +1,11 @@
+{
+  "n": 40,
+  "phase1_p50_ms": 6.113374496635515,
+  "phase1_p95_ms": 9.770695840416009,
+  "phase1_mean_ms": 6.421365624919417,
+  "phase2_completion_p50_ms": 271.37354150181636,
+  "phase2_completion_p95_ms": 400.5400110501795,
+  "phase1_audit_count_mean": 6,
+  "phase2_audit_count_mean": 1,
+  "ratio_p50_p2_over_p1": 44.39013864620372
+}

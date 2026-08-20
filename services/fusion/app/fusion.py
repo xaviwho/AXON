@@ -174,7 +174,7 @@ class FusionEngine:
         )
 
         self._last_emission_at = now
-        self.telemetry.activations_total.inc()
+        self.telemetry.record_activation()
         self.last_emission = EmissionResult(
             trigger_id=trigger_id,
             score=score,

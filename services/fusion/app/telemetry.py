@@ -60,10 +60,21 @@ class FusionTelemetry:
         self._activation_window = activation_window
         self._eval_history: deque[tuple[float, bool]] = deque()
 
+        # Lifetime scalars exposed via `snapshot()` for the /gating endpoint
+        # and for direct read-out by the latency harness. These mirror the
+        # corresponding Prometheus counters so the harness does not need to
+        # scrape and parse the /metrics text format between runs.
+        self._eval_count = 0
+        self._over_count = 0
+        self._activation_count = 0
+
     def record_evaluation(self, score: float, above_threshold: bool) -> None:
         now = time.monotonic()
         self.evaluations_total.inc()
         self.composite_score.set(score)
+        self._eval_count += 1
+        if above_threshold:
+            self._over_count += 1
         self._eval_history.append((now, above_threshold))
         cutoff = now - self._activation_window
         while self._eval_history and self._eval_history[0][0] < cutoff:
@@ -71,6 +82,31 @@ class FusionTelemetry:
         if self._eval_history:
             rate = sum(1 for _, a in self._eval_history if a) / len(self._eval_history)
             self.activation_rate.set(rate)
+
+    def record_activation(self) -> None:
+        """Called once per emitted AnomalyScore (post-cooldown gate crossing)."""
+        self.activations_total.inc()
+        self._activation_count += 1
+
+    def snapshot(self) -> dict[str, float | int]:
+        """Read-out for the /gating endpoint and the latency harness.
+
+        ``gate_ratio`` is Pr[gamma(t) = 1] per methodology Eq. (6): the
+        share of evaluation ticks that emit (both threshold-crossing AND
+        cooldown-elapsed). ``over_threshold_ratio`` is the pre-cooldown
+        share for callers that want to reason about the raw rule-hit rate.
+        """
+        return {
+            "evaluations_total": self._eval_count,
+            "over_threshold_total": self._over_count,
+            "activations_total": self._activation_count,
+            "over_threshold_ratio": (
+                self._over_count / self._eval_count if self._eval_count else 0.0
+            ),
+            "gate_ratio": (
+                self._activation_count / self._eval_count if self._eval_count else 0.0
+            ),
+        }
 
     def render_prometheus(self) -> tuple[bytes, str]:
         return generate_latest(self.registry), CONTENT_TYPE_LATEST

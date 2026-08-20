@@ -7,6 +7,7 @@ from fastapi import FastAPI, Request, Response
 from loguru import logger
 from pydantic import BaseModel, Field
 
+from shared.action_library import ActionLibrary
 from shared.bus import Bus
 
 from .dispatcher import ActionDispatcher, NetworkMode
@@ -23,6 +24,7 @@ class NetworkModeRequest(BaseModel):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     telemetry = ActionTelemetry(service_name=settings.service_name)
+    library = ActionLibrary.load()
     bus = await Bus.connect(settings.redis_url)
     # One persistent HTTP client for the whole service — connection pooling
     # is what keeps per-action latency under our 50 ms plan budget.
@@ -31,6 +33,7 @@ async def lifespan(app: FastAPI):
         bus=bus,
         http=http,
         telemetry=telemetry,
+        library=library,
         actuators_url=settings.actuators_url,
         slice_control_url=settings.slice_control_url,
         timeout_seconds=settings.http_timeout_seconds,
@@ -64,6 +67,8 @@ def health(request: Request) -> dict:
         "redis_connected": request.app.state.bus.healthy,
         "active": d.active,
         "processed_total": d.processed_total,
+        "phase1_total": d.phase1_total,
+        "phase2_total": d.phase2_total,
         "last_trigger_id": d.last_trigger_id,
         "max_concurrent_plans": settings.max_concurrent_plans,
         "actuators_url": settings.actuators_url,

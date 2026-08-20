@@ -41,6 +41,7 @@ from shared.schemas.sensors import SensorReading
 
 REDIS_URL = "redis://localhost:6380/0"
 ACTION_URL = "http://localhost:8007"
+FUSION_URL = "http://localhost:8004"
 RESULTS_DIR = Path(__file__).parent / "results"
 
 EXPECTED_AUDITS_PER_TRIGGER = 6
@@ -79,6 +80,39 @@ async def _set_network_mode(mode: str, base_ms: float, jitter_ms: float) -> None
             json={"mode": mode, "base_ms": base_ms, "jitter_ms": jitter_ms},
         )
         r.raise_for_status()
+
+
+async def _fetch_gating(url: str = FUSION_URL) -> dict | None:
+    """Snapshot fusion's lifetime evaluation + activation counters.
+
+    Returns None if fusion is unreachable (e.g. the harness is run against
+    a partial stack); the report degrades gracefully.
+    """
+    try:
+        async with httpx.AsyncClient(timeout=2.0) as http:
+            r = await http.get(f"{url}/gating")
+            r.raise_for_status()
+            return r.json()
+    except (httpx.HTTPError, ValueError):
+        return None
+
+
+def _gating_delta(before: dict | None, after: dict | None) -> dict | None:
+    """Compute per-run bar_g from before/after snapshots of fusion counters."""
+    if not before or not after:
+        return None
+    evals = after["evaluations_total"] - before["evaluations_total"]
+    if evals <= 0:
+        return None
+    acts = after["activations_total"] - before["activations_total"]
+    over = after["over_threshold_total"] - before["over_threshold_total"]
+    return {
+        "evaluations": evals,
+        "activations": acts,
+        "over_threshold": over,
+        "gate_ratio": acts / evals,
+        "over_threshold_ratio": over / evals,
+    }
 
 
 async def _xrevrange_id(client: aioredis.Redis, stream: str) -> str:
@@ -186,7 +220,7 @@ async def _wait_for_any_anomaly(
 
 async def run_one_mode(
     *, mode: str, base_ms: float, jitter_ms: float, count: int, redis_url: str,
-) -> list[TriggerSample]:
+) -> tuple[list[TriggerSample], dict | None]:
     """Drive `count` sequential triggers under one network mode.
 
     Each iteration:
@@ -204,6 +238,8 @@ async def run_one_mode(
     logger.info("harness: mode={} base={}ms jitter={}ms count={}",
                 mode, base_ms, jitter_ms, count)
     await _set_network_mode(mode, base_ms, jitter_ms)
+
+    gating_before = await _fetch_gating()
 
     client = aioredis.from_url(redis_url, decode_responses=False)
     try:
@@ -270,7 +306,14 @@ async def run_one_mode(
                     )
     finally:
         await client.aclose()
-    return samples
+    gating_after = await _fetch_gating()
+    gating = _gating_delta(gating_before, gating_after)
+    if gating is not None:
+        logger.info(
+            "  {} gating: evaluations={} activations={} bar_g={:.3f}",
+            mode, gating["evaluations"], gating["activations"], gating["gate_ratio"],
+        )
+    return samples, gating
 
 
 # ---- analysis + rendering --------------------------------------------------
@@ -343,7 +386,11 @@ def render_chart(out: Path, samples_by_mode: dict[str, list[float]]) -> None:
     plt.close(fig)
 
 
-def render_markdown_report(out: Path, samples_by_mode: dict[str, list[float]]) -> None:
+def render_markdown_report(
+    out: Path,
+    samples_by_mode: dict[str, list[float]],
+    gating_by_mode: dict[str, dict | None] | None = None,
+) -> None:
     out.parent.mkdir(parents=True, exist_ok=True)
     lines = ["# AXON Latency Harness Report",
              f"_generated {datetime.now(timezone.utc).isoformat()}_", "",
@@ -374,6 +421,23 @@ def render_markdown_report(out: Path, samples_by_mode: dict[str, list[float]]) -
         if u50 > 0:
             lines.append("")
             lines.append(f"**p50 Wi-Fi / URLLC ratio: {w50 / u50:.1f}×**")
+
+    reported = {m: g for m, g in (gating_by_mode or {}).items() if g}
+    if reported:
+        lines += ["", "## Gating (bar_g) per run",
+                  "Measured from fusion's `/gating` endpoint before/after each mode.",
+                  "`bar_g` is Pr[gamma(t)=1] — the share of evaluation ticks that",
+                  "actually crossed the gate (threshold AND cooldown), i.e. the",
+                  "activation ratio in Eq. (6) of the methodology.",
+                  "",
+                  "| mode | evaluations | activations | bar_g |",
+                  "|------|------------:|------------:|------:|"]
+        for mode, g in reported.items():
+            lines.append(
+                f"| {mode} | {g['evaluations']} | {g['activations']} | "
+                f"{g['gate_ratio']:.3f} |"
+            )
+
     lines.append("")
     lines.append("![latency](latency.png)")
     out.write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -392,14 +456,15 @@ async def main() -> int:
     args = parser.parse_args()
 
     by_mode_samples: dict[str, list[TriggerSample]] = {}
+    by_mode_gating: dict[str, dict | None] = {}
     for mode in args.modes:
         if mode == "urllc":
-            samples = await run_one_mode(
+            samples, gating = await run_one_mode(
                 mode="urllc", base_ms=0.0, jitter_ms=0.0,
                 count=args.count, redis_url=args.redis_url,
             )
         elif mode == "wifi":
-            samples = await run_one_mode(
+            samples, gating = await run_one_mode(
                 mode="wifi",
                 base_ms=args.wifi_base_ms,
                 jitter_ms=args.wifi_jitter_ms,
@@ -409,6 +474,7 @@ async def main() -> int:
             logger.error("unknown mode {}", mode)
             return 2
         by_mode_samples[mode] = samples
+        by_mode_gating[mode] = gating
 
     # Reset action to urllc so downstream demos aren't perturbed.
     try:
@@ -423,7 +489,7 @@ async def main() -> int:
         for mode, samples in by_mode_samples.items()
     }
     render_chart(RESULTS_DIR / "latency.png", by_mode_ms)
-    render_markdown_report(RESULTS_DIR / "REPORT.md", by_mode_ms)
+    render_markdown_report(RESULTS_DIR / "REPORT.md", by_mode_ms, by_mode_gating)
 
     print(f"\nCSV    → {RESULTS_DIR / 'latency.csv'}")
     print(f"Chart  → {RESULTS_DIR / 'latency.png'}")

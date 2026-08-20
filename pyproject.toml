@@ -24,6 +24,8 @@ dependencies = [
     "opentelemetry-api>=1.27",
     "opentelemetry-sdk>=1.27",
     "opentelemetry-instrumentation-fastapi>=0.48b0",
+    "sentence-transformers>=3.3",
+    "faiss-cpu>=1.9",
 ]
 
 [project.optional-dependencies]

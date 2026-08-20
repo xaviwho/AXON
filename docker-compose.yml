@@ -78,6 +78,9 @@ services:
       AXON_REDIS_URL: redis://redis:6379/0
       AXON_SCENARIO_PATH: /srv/demos/mock_data/scenarios/${SCENARIO:-mock_idle}.yaml
       AXON_ONNX_PROVIDER: ${AXON_ONNX_PROVIDER:-cpu}
+      # Zero-shot head for fire / smoke / ppe / equipment classes not in YOLOv10.
+      # off (default) skips the OWL-ViTv2 model entirely; on activates it per frame.
+      AXON_ZERO_SHOT_MODE: ${AXON_ZERO_SHOT_MODE:-off}
     volumes:
       - ./demos:/srv/demos:ro
     depends_on:
@@ -156,6 +159,9 @@ services:
       AXON_REDIS_URL: redis://redis:6379/0
       AXON_ACTUATORS_URL: http://axon-actuators-mock:8000
       AXON_SLICE_CONTROL_URL: http://axon-slice-control-mock:8000
+      # Shared HMAC key so console_api can verify dispatcher-signed audits.
+      # Override via .env for prod; the compose default is dev-only.
+      AXON_AUDIT_SIGNING_KEY: ${AXON_AUDIT_SIGNING_KEY:-axon-dev-audit-signing-key-please-override-for-prod}
     depends_on:
       - redis
       - actuators_mock
@@ -175,6 +181,8 @@ services:
       AXON_REDIS_URL: redis://redis:6379/0
       AXON_RULES_PATH: /srv/config/fusion_rules.yaml
       AXON_SQLITE_PATH: /srv/data/console.db
+      # Same key as action — verified against each incoming audit.
+      AXON_AUDIT_SIGNING_KEY: ${AXON_AUDIT_SIGNING_KEY:-axon-dev-audit-signing-key-please-override-for-prod}
     volumes:
       - ./services/fusion/rules.yaml:/srv/config/fusion_rules.yaml:rw
       - ./infra/console_data:/srv/data

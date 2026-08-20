@@ -12,7 +12,11 @@ rules:
     classes: [fire, smoke]
     min_confidence: 0.6
     contribution: 0.5
-    description: Fire or smoke detected by vision (post-fine-tune; until then thermal_threshold proxies it).
+    description: |
+      Fire or smoke detected by vision. Activated by the OWL-ViTv2 zero-shot
+      head (services/vision/app/zero_shot.py) when AXON_VISION_ZERO_SHOT_MODE=on;
+      thermal_threshold below remains the sensor-side proxy for deployments
+      that run vision in yolo-only mode.
 
   - id: person_prone_persistent
     kind: prone_duration

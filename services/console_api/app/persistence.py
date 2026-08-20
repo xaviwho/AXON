@@ -18,6 +18,7 @@ from typing import Any
 
 from loguru import logger
 
+from shared.audit_signing import verify_entry
 from shared.bus import (
     ALERT_STREAM,
     ANOMALY_STREAM,
@@ -135,8 +136,15 @@ class BusPersister:
             return
 
         if stream == AUDIT_STREAM:
+            valid = verify_entry(payload)
+            if not valid:
+                logger.warning(
+                    "audit signature check FAILED action={} trigger={} — "
+                    "row will be persisted with signature_valid=0",
+                    payload.get("action_id"), payload.get("trigger_id"),
+                )
             try:
-                await self._db.insert_audit(payload)
+                await self._db.insert_audit(payload, signature_valid=valid)
             except Exception as exc:    # noqa: BLE001
                 logger.warning("audit insert failed: {}", exc)
         elif stream == ANOMALY_STREAM:

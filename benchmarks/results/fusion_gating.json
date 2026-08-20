@@ -1,0 +1,58 @@
+[
+  {
+    "cooldown_s": 0.1,
+    "evaluations": 600,
+    "over_threshold": 12,
+    "activations": 12,
+    "over_threshold_ratio": 0.02,
+    "gate_ratio": 0.02
+  },
+  {
+    "cooldown_s": 0.5,
+    "evaluations": 600,
+    "over_threshold": 12,
+    "activations": 12,
+    "over_threshold_ratio": 0.02,
+    "gate_ratio": 0.02
+  },
+  {
+    "cooldown_s": 1.0,
+    "evaluations": 600,
+    "over_threshold": 12,
+    "activations": 12,
+    "over_threshold_ratio": 0.02,
+    "gate_ratio": 0.02
+  },
+  {
+    "cooldown_s": 2.0,
+    "evaluations": 600,
+    "over_threshold": 12,
+    "activations": 12,
+    "over_threshold_ratio": 0.02,
+    "gate_ratio": 0.02
+  },
+  {
+    "cooldown_s": 5.0,
+    "evaluations": 600,
+    "over_threshold": 12,
+    "activations": 12,
+    "over_threshold_ratio": 0.02,
+    "gate_ratio": 0.02
+  },
+  {
+    "cooldown_s": 10.0,
+    "evaluations": 600,
+    "over_threshold": 12,
+    "activations": 6,
+    "over_threshold_ratio": 0.02,
+    "gate_ratio": 0.01
+  },
+  {
+    "cooldown_s": 20.0,
+    "evaluations": 600,
+    "over_threshold": 12,
+    "activations": 3,
+    "over_threshold_ratio": 0.02,
+    "gate_ratio": 0.005
+  }
+]

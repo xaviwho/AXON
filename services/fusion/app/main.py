@@ -90,3 +90,15 @@ def health(request: Request) -> dict:
 def metrics(request: Request) -> Response:
     body, ct = request.app.state.telemetry.render_prometheus()
     return Response(content=body, media_type=ct)
+
+
+@app.get("/gating")
+def gating(request: Request) -> dict:
+    """Empirical activation ratio (bar_g) for the compute-cost identity.
+
+    Snapshot of lifetime evaluation and emission counts since fusion
+    started, plus their ratios. Read by demos/latency_harness/ around a
+    run so the paper's ``bar_g approx 0.05`` design target has a measured
+    counterpart per workload.
+    """
+    return request.app.state.telemetry.snapshot()

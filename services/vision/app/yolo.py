@@ -10,25 +10,15 @@ letterbox padding). We undo the letterbox to map back to the original frame.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-
 import cv2
 import numpy as np
 import onnxruntime as ort
 from loguru import logger
 
 from .coco_classes import COCO_CLASSES
+from .types import Detection
 
-
-@dataclass(frozen=True)
-class Detection:
-    class_id: int
-    class_name: str
-    confidence: float
-    x: float        # top-left in original-image pixel coords
-    y: float
-    width: float
-    height: float
+__all__ = ["Detection", "YoloV10"]
 
 
 def _resolve_providers(preference: str) -> list[str]:

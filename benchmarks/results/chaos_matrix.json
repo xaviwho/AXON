@@ -1,0 +1,134 @@
+[
+  {
+    "name": "baseline_no_fault",
+    "elapsed_ms": 1.5682910016039386,
+    "by_action": {
+      "power_cutoff": "success",
+      "hvac_isolate": "success",
+      "slice_reshape": "success",
+      "notify_responders": "success",
+      "display_alert": "success"
+    },
+    "expected": {
+      "power_cutoff": "success",
+      "hvac_isolate": "success",
+      "slice_reshape": "success",
+      "notify_responders": "success",
+      "display_alert": "success"
+    },
+    "matches": 5,
+    "of": 5,
+    "audit_intact": true,
+    "dispatched_count": 5
+  },
+  {
+    "name": "actuator_500",
+    "elapsed_ms": 1.2219589989399537,
+    "by_action": {
+      "power_cutoff": "failure",
+      "hvac_isolate": "success",
+      "slice_reshape": "success",
+      "notify_responders": "success",
+      "display_alert": "success"
+    },
+    "expected": {
+      "power_cutoff": "failure",
+      "hvac_isolate": "success",
+      "slice_reshape": "success",
+      "notify_responders": "success",
+      "display_alert": "success"
+    },
+    "matches": 5,
+    "of": 5,
+    "audit_intact": true,
+    "dispatched_count": 5
+  },
+  {
+    "name": "actuator_timeout",
+    "elapsed_ms": 2.1154999994905666,
+    "by_action": {
+      "power_cutoff": "success",
+      "hvac_isolate": "timeout",
+      "slice_reshape": "success",
+      "notify_responders": "success",
+      "display_alert": "success"
+    },
+    "expected": {
+      "power_cutoff": "success",
+      "hvac_isolate": "timeout",
+      "slice_reshape": "success",
+      "notify_responders": "success",
+      "display_alert": "success"
+    },
+    "matches": 5,
+    "of": 5,
+    "audit_intact": true,
+    "dispatched_count": 5
+  },
+  {
+    "name": "slice_controller_500",
+    "elapsed_ms": 0.8674160053487867,
+    "by_action": {
+      "power_cutoff": "success",
+      "hvac_isolate": "success",
+      "slice_reshape": "failure",
+      "notify_responders": "success",
+      "display_alert": "success"
+    },
+    "expected": {
+      "power_cutoff": "success",
+      "hvac_isolate": "success",
+      "slice_reshape": "failure",
+      "notify_responders": "success",
+      "display_alert": "success"
+    },
+    "matches": 5,
+    "of": 5,
+    "audit_intact": true,
+    "dispatched_count": 5
+  },
+  {
+    "name": "actuator_connect_error",
+    "elapsed_ms": 0.7883750076871365,
+    "by_action": {
+      "power_cutoff": "failure",
+      "hvac_isolate": "success",
+      "slice_reshape": "success",
+      "notify_responders": "success",
+      "display_alert": "success"
+    },
+    "expected": {
+      "power_cutoff": "failure",
+      "hvac_isolate": "success",
+      "slice_reshape": "success",
+      "notify_responders": "success",
+      "display_alert": "success"
+    },
+    "matches": 5,
+    "of": 5,
+    "audit_intact": true,
+    "dispatched_count": 5
+  },
+  {
+    "name": "everything_500",
+    "elapsed_ms": 0.967542000580579,
+    "by_action": {
+      "power_cutoff": "failure",
+      "hvac_isolate": "failure",
+      "slice_reshape": "failure",
+      "notify_responders": "success",
+      "display_alert": "success"
+    },
+    "expected": {
+      "power_cutoff": "failure",
+      "hvac_isolate": "failure",
+      "slice_reshape": "failure",
+      "notify_responders": "success",
+      "display_alert": "success"
+    },
+    "matches": 5,
+    "of": 5,
+    "audit_intact": true,
+    "dispatched_count": 5
+  }
+]

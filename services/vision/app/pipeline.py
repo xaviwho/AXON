@@ -23,6 +23,7 @@ from shared.schemas.vision import BoundingBox, Keypoint, PoseObservation, Vision
 from .pose import PoseEstimator
 from .telemetry import Telemetry
 from .yolo import YoloV10
+from .zero_shot import ZeroShotDetector
 
 
 class CameraPipeline:
@@ -33,11 +34,13 @@ class CameraPipeline:
         yolo: YoloV10,
         pose: PoseEstimator,
         telemetry: Telemetry,
+        zero_shot: ZeroShotDetector | None = None,
     ) -> None:
         self.camera_id = camera_id
         self.bus = bus
         self.yolo = yolo
         self.pose = pose
+        self.zero_shot = zero_shot
         self.telemetry = telemetry
         self._task: asyncio.Task | None = None
         self._stop = asyncio.Event()
@@ -87,6 +90,12 @@ class CameraPipeline:
         with self.telemetry.inference_span("pose", self.camera_id):
             poses = await asyncio.to_thread(self.pose.detect, image)
 
+        # Zero-shot head for the classes YOLOv10 does not carry.
+        if self.zero_shot is not None and self.zero_shot.active:
+            with self.telemetry.inference_span("zero_shot", self.camera_id):
+                zs = await asyncio.to_thread(self.zero_shot.detect, image)
+            detections = list(detections) + list(zs)
+
         await self._publish_detections(detections, frame_id, ts)
         await self._publish_poses(poses, ts)
 
@@ -135,9 +144,11 @@ class VisionWorker:
         yolo: YoloV10,
         pose: PoseEstimator,
         telemetry: Telemetry,
+        zero_shot: ZeroShotDetector | None = None,
     ) -> None:
         self._pipelines = [
-            CameraPipeline(cam, bus, yolo, pose, telemetry) for cam in camera_ids
+            CameraPipeline(cam, bus, yolo, pose, telemetry, zero_shot)
+            for cam in camera_ids
         ]
 
     async def start(self) -> None:

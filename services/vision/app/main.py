@@ -13,6 +13,7 @@ from .pose import PoseEstimator
 from .settings import settings
 from .telemetry import init_telemetry
 from .yolo import YoloV10
+from .zero_shot import ZeroShotConfig, ZeroShotDetector
 
 
 @asynccontextmanager
@@ -33,7 +34,13 @@ async def lifespan(app: FastAPI):
         provider=settings.onnx_provider,
     )
     pose = PoseEstimator(str(settings.pose_task_path))
-    worker = VisionWorker(bus, camera_ids, yolo, pose, telemetry)
+    zero_shot = ZeroShotDetector(ZeroShotConfig(
+        mode=settings.zero_shot_mode,
+        model_name=settings.zero_shot_model,
+        score_threshold=settings.zero_shot_threshold,
+        device=settings.zero_shot_device,
+    ))
+    worker = VisionWorker(bus, camera_ids, yolo, pose, telemetry, zero_shot)
     await worker.start()
 
     app.state.bus = bus
@@ -41,6 +48,7 @@ async def lifespan(app: FastAPI):
     app.state.telemetry = telemetry
     app.state.yolo = yolo
     app.state.pose = pose
+    app.state.zero_shot = zero_shot
     app.state.scenario = scenario
     try:
         yield
@@ -62,6 +70,12 @@ def health(request: Request) -> dict:
         "scenario": request.app.state.scenario.name,
         "redis_connected": request.app.state.bus.healthy,
         "yolo_provider": request.app.state.yolo.active_provider,
+        "zero_shot": {
+            "active": request.app.state.zero_shot.active,
+            "mode": settings.zero_shot_mode,
+            "model": settings.zero_shot_model if settings.zero_shot_mode == "on" else None,
+            "classes": request.app.state.zero_shot.supported_classes,
+        },
         "pipelines": request.app.state.worker.status(),
     }
 

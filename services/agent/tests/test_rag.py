@@ -12,7 +12,10 @@ KB_DIR = REPO_ROOT / "shared" / "knowledge_base"
 
 @pytest.fixture(scope="module")
 def kb() -> KnowledgeBase:
-    return KnowledgeBase.load(KB_DIR)
+    # Legacy keyword backend — kept for portability and to lock in the
+    # substring-ranking contract. The semantic backend is exercised in
+    # test_rag_semantic.py.
+    return KnowledgeBase.load(KB_DIR, backend="keyword")
 
 
 def test_kb_loads_real_sections(kb):

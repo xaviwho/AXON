@@ -13,6 +13,7 @@ from services.action.app.handlers import HANDLERS
 from services.action.app.telemetry import ActionTelemetry
 from services.actuators_mock.app.main import app as actuators_app
 from services.slice_control_mock.app.main import app as slice_app
+from shared.action_library import ActionLibrary
 from shared.schemas.actions import ActionInvocation, ActionPlan
 from shared.schemas.enums import ActionEffect
 
@@ -52,6 +53,7 @@ async def dispatcher():
     tel = ActionTelemetry()
     d = ActionDispatcher(
         bus=bus, http=http, telemetry=tel,
+        library=ActionLibrary.load(),
         actuators_url="http://actuators-mock:8000",
         slice_control_url="http://slice-control-mock:8000",
         timeout_seconds=5.0, max_concurrent_plans=5,

@@ -30,11 +30,15 @@ CREATE TABLE IF NOT EXISTS audit_entries (
     agent_confidence REAL   NOT NULL,
     layer_d_trace   TEXT    NOT NULL,
     parameters_json TEXT,
-    latency_ms      REAL
+    latency_ms      REAL,
+    phase           INTEGER NOT NULL DEFAULT 1,
+    signature_hex   TEXT,
+    signature_valid INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_audit_trigger ON audit_entries(trigger_id);
 CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON audit_entries(timestamp);
 CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_entries(action_id);
+CREATE INDEX IF NOT EXISTS idx_audit_signature_valid ON audit_entries(signature_valid);
 
 CREATE TABLE IF NOT EXISTS anomalies (
     trigger_id            TEXT PRIMARY KEY,
@@ -76,7 +80,27 @@ class AuditDB:
         self._conn = sqlite3.connect(str(path), check_same_thread=False, isolation_level=None)
         self._conn.row_factory = sqlite3.Row
         self._conn.executescript(_SCHEMA)
+        self._migrate_audit_columns()
         logger.info("audit DB ready at {}", path)
+
+    def _migrate_audit_columns(self) -> None:
+        """Add columns introduced after v1 (phase, signature_*) to legacy DBs.
+
+        The ``IF NOT EXISTS`` guard on the initial CREATE TABLE means an
+        existing DB from an older version keeps its old shape. ALTER TABLE
+        ADD COLUMN with a default is safe and idempotent as long as we
+        swallow the ``duplicate column name`` failure on second run.
+        """
+        for stmt in (
+            "ALTER TABLE audit_entries ADD COLUMN phase INTEGER NOT NULL DEFAULT 1",
+            "ALTER TABLE audit_entries ADD COLUMN signature_hex TEXT",
+            "ALTER TABLE audit_entries ADD COLUMN signature_valid INTEGER NOT NULL DEFAULT 0",
+        ):
+            try:
+                self._conn.execute(stmt)
+            except sqlite3.OperationalError as exc:
+                if "duplicate column" not in str(exc).lower():
+                    raise
 
     @property
     def path(self) -> Path:
@@ -88,19 +112,25 @@ class AuditDB:
 
     # --- writers (called by the bus tailer) ---------------------------------
 
-    async def insert_audit(self, e: dict[str, Any]) -> int:
+    async def insert_audit(
+        self, e: dict[str, Any], *, signature_valid: bool = False,
+    ) -> int:
         async with self._lock:
             cur = self._conn.execute(
                 """
                 INSERT INTO audit_entries (
                     timestamp, trigger_id, action_id, severity, effect,
-                    agent_confidence, layer_d_trace, parameters_json, latency_ms
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    agent_confidence, layer_d_trace, parameters_json, latency_ms,
+                    phase, signature_hex, signature_valid
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     e["timestamp"], e.get("trigger_id"), e["action_id"], e["severity"],
                     e["effect"], e["agent_confidence"], e["layer_d_trace"],
                     json.dumps(e.get("parameters") or {}), e.get("latency_ms"),
+                    int(e.get("phase") or 1),
+                    e.get("signature"),
+                    1 if signature_valid else 0,
                 ),
             )
             return int(cur.lastrowid)
@@ -212,7 +242,8 @@ class AuditDB:
             rows = self._conn.execute(
                 f"""
                 SELECT id, timestamp, trigger_id, action_id, severity, effect,
-                       agent_confidence, layer_d_trace, parameters_json, latency_ms
+                       agent_confidence, layer_d_trace, parameters_json, latency_ms,
+                       phase, signature_hex, signature_valid
                 FROM audit_entries {where}
                 ORDER BY id DESC LIMIT ? OFFSET ?
                 """,
@@ -225,7 +256,8 @@ class AuditDB:
             row = self._conn.execute(
                 """
                 SELECT id, timestamp, trigger_id, action_id, severity, effect,
-                       agent_confidence, layer_d_trace, parameters_json, latency_ms
+                       agent_confidence, layer_d_trace, parameters_json, latency_ms,
+                       phase, signature_hex, signature_valid
                 FROM audit_entries WHERE id = ?
                 """,
                 (audit_id,),
@@ -246,7 +278,8 @@ class AuditDB:
             audits = self._conn.execute(
                 """
                 SELECT id, timestamp, trigger_id, action_id, severity, effect,
-                       agent_confidence, layer_d_trace, parameters_json, latency_ms
+                       agent_confidence, layer_d_trace, parameters_json, latency_ms,
+                       phase, signature_hex, signature_valid
                 FROM audit_entries WHERE trigger_id = ? ORDER BY id ASC
                 """,
                 (trigger_id,),
@@ -306,7 +339,18 @@ def _audit_row(r: sqlite3.Row | None) -> dict | None:
         "layer_d_trace": r["layer_d_trace"],
         "parameters": json.loads(r["parameters_json"] or "{}"),
         "latency_ms": r["latency_ms"],
+        "phase": _row_get(r, "phase", 1),
+        "signature_hex": _row_get(r, "signature_hex", None),
+        "signature_valid": bool(_row_get(r, "signature_valid", 0)),
     }
+
+
+def _row_get(r: sqlite3.Row, key: str, default: Any) -> Any:
+    """Row.__getitem__ raises IndexError when the column is missing (legacy DB)."""
+    try:
+        return r[key]
+    except (IndexError, KeyError):
+        return default
 
 
 def _anomaly_row(r: sqlite3.Row) -> dict:

@@ -1,0 +1,285 @@
+\section{Methodology}
+\label{sec:method}
+AXON is specified as a set of stream transducers communicating over an ordered
+message bus. This section formalizes the pipeline and its two latency classes
+(Sec.~\ref{sec:model}), the cost-gating fusion layer (Sec.~\ref{sec:gate}), the
+constrained reasoning stage with its safety guarantee (Sec.~\ref{sec:plan}), the
+agentic closed loop into the network (Sec.~\ref{sec:loop}), and an analytical
+latency model consistent with the measurements (Sec.~\ref{sec:latency}).
+Table~\ref{tab:notation} summarizes the notation, while Figure~\ref{fig:arch} illustrates the five layers.
+
+\begin{figure}[!htbp]
+\centering
+\includegraphics[width=\columnwidth]{images/axon_architecture.png}
+\caption{AXON five-layer architecture. The dashed control loop
+(action~$\rightarrow$~network) is the agentic slice-reshape contribution;
+sensing, connectivity, and actuators are partner- or customer-provided.}
+\label{fig:arch}
+\end{figure}
+
+\begin{table}[!htbp]
+\centering
+\caption{Notation}
+\label{tab:notation}
+\scalebox{0.78}{
+\begin{tabular}{@{}ll@{}}
+\toprule
+Symbol & Meaning \\
+\midrule
+$\mathcal{R}$, $w_r$, $\phi_r$ & rule set; weight and predicate of rule $r$ \\
+$s(t)$, $\theta$ & composite anomaly score; gate threshold ($0.4$) \\
+$\tau_{cd}$, $\Delta$ & emission cooldown ($10$\,s); prone window ($5$\,s) \\
+$\gamma(t)$, $\beta$ & gate indicator; trigger reason (firing rule ids) \\
+$\bar g$, $C_{AB},C_{CD}$ & activation ratio; per-stage compute cost \\
+$\mathcal{A}$, $\sigma_a$ & bounded action library; parameter schema of $a$ \\
+$\pi=(\text{sev},\mathbf{a},\xi,c)$ & plan: severity, actions, rationale, confidence \\
+$V(\pi)$, $c_{fl}$, $r_{\max}$ & plan validity; confidence floor ($0.5$); retries ($1$) \\
+$F(\beta)$, $M(\cdot)$ & deterministic fallback; medical-override projection \\
+$\rho\in\{1,\dots,10\}^3$ & slice-priority vector (eMBB, URLLC, mMTC) \\
+$\ell_a,\,d_a,\,\delta$ & per-action latency; handler time; network delay \\
+$L$, $T$ & end-to-end gated latency; latency budget ($100$\,ms) \\
+$\varphi\in\{1,2\}$ & dispatch phase: $1{=}\Pi_g$ protocol, $2{=}\Pi_d$ delta \\
+$k$, $\sigma_r$ & shared HMAC key; audit signature of record $r$ \\
+\bottomrule
+\end{tabular}}
+\end{table}
+
+\subsection{\textbf{System Model and Latency Classes}}
+\label{sec:model}
+An event originates as a sensor reading $x$ published on the bus at time $t_0$
+and propagates through a fixed transducer chain
+$\text{vision}\!\rightarrow\!\text{fusion}\!\rightarrow\!\text{VLM}\!\rightarrow\!
+\text{agent}\!\rightarrow\!\text{action}$. Each message is schema-validated at its
+boundary, and every consumer advances a monotonic per-stream cursor rather than
+re-resolving the stream tail, guaranteeing no event on a low-rate stream is
+skipped. We distinguish a \emph{gated actuation path} $\Pi_g$
+(fusion $\rightarrow$ dispatch), which produces the physical response, from a
+\emph{deliberative path} $\Pi_d$ (VLM $\rightarrow$ agent), which refines
+secondary actions and the audit record. The design objective is
+\begin{equation}
+\min\; L = t_{\text{act}} - t_0
+\quad\text{s.t.}\quad L \le T,\;\; V(\hat\pi)=1,
+\label{eq:objective}
+\end{equation}
+with the deliberative path $\Pi_d$ excluded from the critical path by
+construction: actuation must complete within the budget $T$ and emit only a valid
+plan $\hat\pi$, while the expensive models in $\Pi_d$ run off the critical path.
+
+\subsection{\textbf{Anomaly Fusion and Cost Gating}}
+\label{sec:gate}
+Layer~B is the economic control point: it decides \emph{when} the deliberative
+models may run. Each rule $r\in\mathcal{R}$ carries a predicate $\phi_r(t)\in\{0,1\}$
+over the current detection, pose, and sensor window and a fixed weight $w_r$.
+Time-dependent predicates are evaluated on a fixed tick; e.g.\ the persistence
+predicate for a prone person is
+\begin{equation}
+\phi_{\text{prone}}(t) = \mathbb{1}\!\left[\,\text{posture}_p(\tau)=\text{prone}
+\;\;\forall\,\tau\in[t-\Delta,\,t]\,\right].
+\label{eq:prone}
+\end{equation}
+The composite anomaly score is the weight sum capped at unity,
+\begin{equation}
+s(t) = \min\!\Big(1,\; \textstyle\sum_{r\in\mathcal{R}} w_r\,\phi_r(t)\Big),
+\label{eq:score}
+\end{equation}
+and fusion emits an anomaly---the \emph{sole} activation signal for $\Pi_d$---iff
+the score exceeds the threshold and the cooldown has elapsed:
+\begin{equation}
+\gamma(t) = \mathbb{1}\!\big[\,s(t) > \theta\,\big]\cdot
+             \mathbb{1}\!\big[\,t - t_{\text{last}} \ge \tau_{cd}\,\big].
+\label{eq:gate}
+\end{equation}
+Weights are set so that an unambiguous single signal
+($w=0.5$--$0.6 > \theta$) crosses the gate alone while a weak informational signal
+($w=0.3$) requires a compounding one. The value of gating is compute: with
+per-frame cost $C_{AB}$ always paid and deliberative cost $C_{CD}$ paid only on
+activation, the expected cost per frame is
+\begin{equation}
+\mathbb{E}[C] = C_{AB} + \bar g\,C_{CD}, \qquad \bar g = \Pr[\gamma(t)=1],
+\label{eq:compute}
+\end{equation}
+where the activation ratio $\bar g$ is a deployment property (design target
+$\bar g \approx 0.05$). Algorithm~\ref{alg:gate} states the procedure.
+
+\begin{algorithm}[t]
+\caption{Fusion gate (Layer~B)}
+\label{alg:gate}
+\begin{algorithmic}[1]
+\State $t_{\text{last}} \gets -\infty$
+\Loop \Comment{on each tick}
+  \State $x \gets$ latest detections, poses, sensor readings
+  \State $s \gets \min\!\big(1,\sum_{r\in\mathcal{R}} w_r\,\phi_r(x)\big)$
+         \Comment{Eqs.~\eqref{eq:prone}--\eqref{eq:score}}
+  \If{$s > \theta$ \textbf{and} $t - t_{\text{last}} \ge \tau_{cd}$}
+     \State $\beta \gets \{\,\text{id}(r) : \phi_r(x)=1\,\}$
+     \State \textbf{emit} $\text{Anomaly}(s,\beta)$; cache trigger context
+     \State $t_{\text{last}} \gets t$
+  \EndIf
+\EndLoop
+\end{algorithmic}
+\end{algorithm}
+
+\subsection{\textbf{Constrained Reasoning and Safe Planning}}
+\label{sec:plan}
+On activation, the VLM maps keyframes and sensor context to a validated scene
+description $D$, and the agent maps $(\beta,D)$, retrieved site context, and the
+action catalog to a plan $\pi=(\text{sev},\mathbf{a},\xi,c)$ with
+$\text{sev}\in\{0,\dots,5\}$, actions $\mathbf{a}=(a_1,\dots,a_k)$, rationale
+$\xi$, and confidence $c\in[0,1]$. The library $\mathcal{A}$ ($|\mathcal{A}|=8$)
+is the contract surface: a plan is valid only if it parses and every action is a
+library member with schema-conformant parameters,
+\begin{equation}
+V(\pi) = \mathbb{1}[\text{schema}(\pi)]\;
+\prod_{i=1}^{k}\mathbb{1}[a_i\in\mathcal{A}]\,
+\mathbb{1}[\text{params}(a_i)\models \sigma_{a_i}].
+\label{eq:valid}
+\end{equation}
+After at most $r_{\max}$ correction retries, the agent output is accepted only if
+valid and sufficiently confident; otherwise a deterministic protocol
+$F(\beta)$ keyed to the trigger is substituted:
+\begin{equation}
+\pi^{\star} =
+\begin{cases}
+\pi_{\text{LLM}}, & V(\pi_{\text{LLM}})=1 \;\wedge\; c \ge c_{fl},\\[2pt]
+F(\beta), & \text{otherwise.}
+\end{cases}
+\label{eq:decision}
+\end{equation}
+A safety projection then removes every door-locking action whenever a persistent
+medical signal is present. Writing $D(\pi)=\{a\in\mathbf{a}:\text{id}(a)=\texttt{door\_lock}\}$,
+the emitted plan is
+\begin{equation}
+\hat\pi = M(\pi^{\star}),\qquad
+M(\pi)=\begin{cases}
+\pi \setminus D(\pi), & \texttt{prone}\in\beta,\\
+\pi, & \text{otherwise.}
+\end{cases}
+\label{eq:override}
+\end{equation}
+
+\begin{proposition}[Egress safety]
+\label{prop:safety}
+If $\texttt{person\_prone\_persistent}\in\beta$, the emitted plan $\hat\pi$
+contains no \texttt{door\_lock} action, regardless of the model output.
+\end{proposition}
+\begin{proof}
+By \eqref{eq:decision}, $\pi^{\star}$ is either the validated model plan or the
+fallback $F(\beta)$; in both cases $\pi^\star$ is a finite action set. When
+$\texttt{prone}\in\beta$, \eqref{eq:override} applies $M$, which deletes every
+action with identifier $\texttt{door\_lock}$, and the system emits
+$\hat\pi=M(\pi^\star)$. Hence no \texttt{door\_lock} action can survive emission.
+\end{proof}
+
+Algorithm~\ref{alg:plan} summarizes the stage; validation
+(\ref{eq:valid}) and the fail-safe (\ref{eq:decision}) bound the agent to
+$\mathcal{A}$ and guarantee a well-formed plan even under model failure.
+
+\begin{algorithm}[t]
+\caption{Gated safe planning (Layers~C,~D)}
+\label{alg:plan}
+\begin{algorithmic}[1]
+\Require anomaly $(s,\beta)$, scene $D$
+\Ensure emitted plan $\hat\pi$
+\State $\pi \gets \bot$
+\For{$j \gets 0$ \textbf{to} $r_{\max}$}
+  \State $y \gets \text{LLM}\big(\text{prompt}(\beta, D, \text{RAG}, \mathcal{A})\big)$
+  \State $\pi \gets \text{Parse}(y)$
+  \If{$\pi \ne \bot$ \textbf{and} $V(\pi)=1$}
+    \State \textbf{break} \Comment{Eq.~\eqref{eq:valid}}
+  \EndIf
+\EndFor
+\If{$\pi \ne \bot$ \textbf{and} $V(\pi)=1$ \textbf{and} $c(\pi) \ge c_{fl}$}
+  \State $\pi^{\star} \gets \pi$
+\Else
+  \State $\pi^{\star} \gets F(\beta)$ \Comment{deterministic fallback}
+\EndIf
+\State $\hat\pi \gets M(\pi^{\star})$ \Comment{Eq.~\eqref{eq:override}; Prop.~\ref{prop:safety}}
+\State \textbf{emit} $\hat\pi$
+\State \Return $\hat\pi$
+\end{algorithmic}
+\end{algorithm}
+
+\subsection{\textbf{Agentic Closed-Loop Slice Control}}
+\label{sec:loop}
+The distinguishing member of $\mathcal{A}$ is \texttt{slice\_reshape}, which
+closes a control loop from the action layer back onto connectivity. Let
+$\rho=(\rho_{\text{eMBB}},\rho_{\text{URLLC}},\rho_{\text{mMTC}})\in\{1,\dots,10\}^3$
+be the slice-priority vector. A \texttt{slice\_reshape} action carries a set
+$S$ of (slice, priority) targets and an optional hold $h$, and its effect is the
+assignment
+\begin{equation}
+\rho_i \leftarrow \rho'_i \quad \forall\,(i,\rho'_i)\in S,
+\label{eq:reshape}
+\end{equation}
+optionally reverted after $h$. Thus the reasoning agent can, mid-incident, raise
+the incident-zone video priority, reserve URLLC capacity for actuator commands,
+and deprioritize routine telemetry. Algorithm~\ref{alg:dispatch} dispatches a
+plan's actions concurrently---since the library carries no inter-action
+dependencies---routing \texttt{slice\_reshape} to the slice controller and
+writing one signed audit record per action.
+
+Each audit record $r=(a,e,c(\hat\pi),\ell_a,\varphi,t)$ carries a keyed
+signature
+\begin{equation}
+\sigma_r = \mathrm{HMAC}_k\!\big(\mathrm{canonical}(r)\big),
+\label{eq:sign}
+\end{equation}
+where $k$ is a per-deployment shared secret and $\mathrm{canonical}(\cdot)$
+serializes the tuple with sorted keys and $\sigma_r$ elided. The phase
+$\varphi\in\{1,2\}$ distinguishes the Phase-1 $\Pi_g$ dispatch of $F(\beta)$
+from the Phase-2 $\Pi_d$ delta driven by the refined plan; downstream
+persisters verify $\sigma_r$ before mirroring and flag records whose
+signature does not recompute, so any tampering after emission is detectable.
+
+\begin{algorithm}[t]
+\caption{Parallel dispatch with slice-control feedback (Layer~4)}
+\label{alg:dispatch}
+\begin{algorithmic}[1]
+\Require emitted plan $\hat\pi$, phase $\varphi\in\{1,2\}$
+\ForAll{$a \in \text{actions}(\hat\pi)$} \Comment{conceptually in parallel}
+  \If{$\text{id}(a) = \texttt{slice\_reshape}$}
+    \For{$(i,\rho'_i) \in S(a)$}
+      \State $\rho_i \gets \rho'_i$ \Comment{controller; Eq.~\eqref{eq:reshape}}
+    \EndFor
+    \State $e \gets \text{ok}$
+  \Else
+    \State $e \gets \text{Handler}(a)$
+  \EndIf
+  \State $r \gets (a,\,e,\,c(\hat\pi),\,\ell_a,\,\varphi,\,t)$
+  \State $\sigma_r \gets \mathrm{HMAC}_k(\mathrm{canonical}(r))$
+         \Comment{Eq.~\eqref{eq:sign}}
+  \State \textbf{write} $\text{Audit}(r,\sigma_r)$
+\EndFor
+\end{algorithmic}
+\end{algorithm}
+
+\subsection{\textbf{Latency Model}}
+\label{sec:latency}
+Because a plan's actions dispatch concurrently, the network discipline enters the
+critical path once per action, not once per plan. With handler service time
+$d_a$, base delay $b=150$\,ms, and jitter $J=100$\,ms, the per-action latency is
+\begin{equation}
+\ell_a = d_a + \delta,\qquad
+\delta =
+\begin{cases}
+0, & \text{URLLC},\\[2pt]
+b + \mathcal{U}(0,J), & \text{contended (Wi-Fi).}
+\end{cases}
+\label{eq:peraction}
+\end{equation}
+The dispatch window is the maximum over the plan's actions rather than their sum,
+\begin{equation}
+L_{\text{disp}} = \max_{a\in\mathbf{a}} \ell_a,
+\label{eq:window}
+\end{equation}
+so the end-to-end gated latency is
+\begin{equation}
+L = t_{A} + t_{B} + L_{\text{disp}} \;\le\; T,
+\label{eq:e2e}
+\end{equation}
+where $t_A,t_B$ are the vision and fusion stage times. Under URLLC, $\delta=0$ and
+$L_{\text{disp}}\!\approx\!\max_a d_a$; under contention, $\delta$ dominates and,
+by \eqref{eq:window}, inflates the window toward $b+J$, which accounts for the
+order-of-magnitude gap reported in the evaluation. Since $\Pi_d$ is excluded from
+\eqref{eq:e2e} by construction \eqref{eq:objective}, replacing the stubbed models
+with GPU-served ones does not affect the gated-path budget.

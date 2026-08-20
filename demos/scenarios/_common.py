@@ -226,17 +226,15 @@ def validate_incident(
     audits = incident.get("audits") or []
     anomaly = incident.get("anomaly") or {}
 
-    action_ids = {a.get("action_id") for a in (plan.get("actions") or [])}
-    missing = required_actions - action_ids
+    # Under the two-phase dispatcher, the actions the actuators saw are the
+    # audited ones (Phase-1 F(beta) built inside the dispatcher, plus any
+    # Phase-2 delta from the refined plan). The optional Phase-2 plan on
+    # axon:plans is a refinement, not the source of truth. Validate the
+    # audited set; use plan metadata only for severity if the plan exists.
+    audit_action_ids = {a["action_id"] for a in audits}
+    missing = required_actions - audit_action_ids
     if missing:
         res.failures.append(f"missing required actions: {sorted(missing)}")
-
-    audit_action_ids = {a["action_id"] for a in audits}
-    if audit_action_ids != action_ids:
-        res.failures.append(
-            f"audit/plan mismatch — plan={sorted(action_ids)} "
-            f"audited={sorted(audit_action_ids)}"
-        )
 
     bad_effects = [a for a in audits if a["effect"] != expected_effect]
     if bad_effects:
@@ -245,22 +243,33 @@ def validate_incident(
             + ", ".join(f"{a['action_id']}={a['effect']}" for a in bad_effects)
         )
 
-    sev = plan.get("severity", -1)
+    # Severity: prefer the refined plan when present, else derive from the
+    # (uniform) severity on the audit records — Phase-1 stamps it from F(beta).
+    if plan.get("severity") is not None:
+        sev = plan["severity"]
+    else:
+        sevs = {a.get("severity") for a in audits if a.get("severity") is not None}
+        sev = max(sevs) if sevs else -1
     if not (severity_min <= sev <= severity_max):
         res.failures.append(f"severity {sev} not in [{severity_min}, {severity_max}]")
 
+    # Dispatch window: prefer anomaly → last-audit under the two-phase
+    # architecture (the plan is redundant with the actuation now); fall back
+    # to plan → last-audit when we have a plan and no anomaly ts.
     if dispatch_budget_ms is not None and audits:
-        plan_ts = _ts(plan.get("timestamp"))
-        if plan_ts is not None:
+        anchor_ts = _ts(anomaly.get("timestamp")) or _ts(plan.get("timestamp"))
+        anchor_label = "anomaly" if anomaly.get("timestamp") else "plan"
+        if anchor_ts is not None:
             spans = [
-                _ts(a["timestamp"]) - plan_ts
+                _ts(a["timestamp"]) - anchor_ts
                 for a in audits if _ts(a["timestamp"]) is not None
             ]
             spans = [s for s in spans if s is not None]
             if spans:
                 window = max(spans) * 1000.0
                 res.notes.append(
-                    f"plan→all-audits window: {window:.1f}ms (budget {dispatch_budget_ms}ms)"
+                    f"{anchor_label}→all-audits window: {window:.1f}ms "
+                    f"(budget {dispatch_budget_ms}ms)"
                 )
                 if window > dispatch_budget_ms:
                     res.failures.append(
