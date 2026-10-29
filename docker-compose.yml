@@ -159,6 +159,8 @@ services:
       AXON_REDIS_URL: redis://redis:6379/0
       AXON_ACTUATORS_URL: http://axon-actuators-mock:8000
       AXON_SLICE_CONTROL_URL: http://axon-slice-control-mock:8000
+      # Gated path (Phase 1). `false` = full B → C → D chain, for comparison.
+      AXON_PHASE1_ENABLED: ${AXON_PHASE1_ENABLED:-true}
       # Shared HMAC key so console_api can verify dispatcher-signed audits.
       # Override via .env for prod; the compose default is dev-only.
       AXON_AUDIT_SIGNING_KEY: ${AXON_AUDIT_SIGNING_KEY:-axon-dev-audit-signing-key-please-override-for-prod}

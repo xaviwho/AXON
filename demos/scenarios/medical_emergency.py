@@ -67,6 +67,7 @@ async def main() -> int:
         expected_effect="success",
         severity_min=4, severity_max=5,
         dispatch_budget_ms=200.0,
+        audit_budget_ms=100.0,
     )
 
     # Forbidden-action check (door_lock must not appear in the medical plan).

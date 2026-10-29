@@ -212,3 +212,37 @@ async def test_plan_without_prior_anomaly_dispatches_as_phase1(dispatcher):
     assert len(bus.audits) == 1
     assert bus.audits[0]["phase"] == 1
     assert bus.audits[0]["effect"] == ActionEffect.SUCCESS.value
+
+
+@pytest.mark.asyncio
+async def test_phase1_zone_matches_layer_d_plan_so_nothing_fires_twice():
+    """Live-stack regression: Phase 1 hard-coded zone "unknown" while Layer C
+    reports "lab-A", so the agent's identical protocol never deduped and every
+    action dispatched twice. With a matching phase1_zone, Phase 2 is a no-op.
+    """
+    from shared.protocols import build_protocol
+
+    http = httpx.AsyncClient(transport=_MultiHostTransport(), timeout=5.0)
+    bus = _MemoryBus()
+    library = ActionLibrary.load()
+    d = ActionDispatcher(
+        bus=bus, http=http, telemetry=ActionTelemetry(), library=library,
+        actuators_url="http://actuators-mock:8000",
+        slice_control_url="http://slice-control-mock:8000",
+        timeout_seconds=5.0, phase1_zone="lab-A",
+    )
+    try:
+        await d._dispatch_phase1(_anomaly("thermal_threshold", trigger_id="t-zone"))
+        assert {a["parameters"].get("zone_id") for a in bus.audits} <= {"lab-A", None}
+        baseline = len(bus.audits)
+
+        # What the agent publishes for the same trigger once Layer C says lab-A.
+        layer_d = build_protocol(
+            trigger_id="t-zone", trigger_reason="thermal_threshold",
+            library=library, zone="lab-A", reason_note="layer D (stub)",
+        )
+        await d._dispatch_phase2(layer_d)
+        assert len(bus.audits) == baseline
+        assert d.phase2_total == 0
+    finally:
+        await http.aclose()

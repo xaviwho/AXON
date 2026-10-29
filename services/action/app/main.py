@@ -38,6 +38,8 @@ async def lifespan(app: FastAPI):
         slice_control_url=settings.slice_control_url,
         timeout_seconds=settings.http_timeout_seconds,
         max_concurrent_plans=settings.max_concurrent_plans,
+        phase1_zone=settings.phase1_zone,
+        phase1_enabled=settings.phase1_enabled,
     )
     await dispatcher.start()
 
@@ -69,6 +71,7 @@ def health(request: Request) -> dict:
         "processed_total": d.processed_total,
         "phase1_total": d.phase1_total,
         "phase2_total": d.phase2_total,
+        "phase1_enabled": d.phase1_enabled,
         "last_trigger_id": d.last_trigger_id,
         "max_concurrent_plans": settings.max_concurrent_plans,
         "actuators_url": settings.actuators_url,

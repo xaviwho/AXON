@@ -99,8 +99,17 @@ class ActionDispatcher:
         timeout_seconds: float,
         max_concurrent_plans: int = 5,
         network: NetworkMode | None = None,
+        phase1_zone: str = "unknown",
+        phase1_enabled: bool = True,
     ) -> None:
+        # False = no anomaly consumer: every trigger waits for Layer D's plan.
+        # Only for measuring the full B → C → D chain against the gated path.
+        self.phase1_enabled = phase1_enabled
         self._bus = bus
+        # AnomalyScore carries no location; Phase 1 must target the same zone
+        # Layer C reports (services/vlm `_infer_location`) or Phase 2's
+        # canonical keys never match and every action fires twice.
+        self._phase1_zone = phase1_zone
         self._http = http
         self._telemetry = telemetry
         self._library = library
@@ -122,10 +131,14 @@ class ActionDispatcher:
 
     async def start(self) -> None:
         self._stop.clear()
-        self._tasks = [
-            asyncio.create_task(self._run_anomalies(), name="action-anomaly-consumer"),
-            asyncio.create_task(self._run_plans(), name="action-plan-consumer"),
-        ]
+        self._tasks = [asyncio.create_task(self._run_plans(), name="action-plan-consumer")]
+        if self.phase1_enabled:
+            self._tasks.append(
+                asyncio.create_task(self._run_anomalies(), name="action-anomaly-consumer")
+            )
+        else:
+            # _run_anomalies normally owns the `active` flag for /health.
+            self.active = True
 
     async def stop(self) -> None:
         self._stop.set()
@@ -179,7 +192,7 @@ class ActionDispatcher:
             trigger_id=anomaly.trigger_id,
             trigger_reason=anomaly.trigger_reason,
             library=self._library,
-            zone="unknown",
+            zone=self._phase1_zone,
             reason_note="phase-1 gated protocol",
             timestamp=anomaly.timestamp,
         )
@@ -256,7 +269,7 @@ class ActionDispatcher:
         async with self._sem:
             self._telemetry.in_flight.inc()
             self._telemetry.plans_total.inc()
-            plan_start = time.monotonic()
+            plan_start = time.perf_counter()
             ctx = HandlerContext(
                 http=self._http,
                 bus=self._bus,
@@ -271,7 +284,7 @@ class ActionDispatcher:
                     return_exceptions=False,
                 )
             finally:
-                plan_elapsed = time.monotonic() - plan_start
+                plan_elapsed = time.perf_counter() - plan_start
                 self._telemetry.plan_latency.observe(plan_elapsed)
                 self._telemetry.in_flight.dec()
 

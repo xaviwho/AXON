@@ -1,4 +1,4 @@
-.PHONY: up down test lint format demo demo-all rehearsal latency-measure stack-up stack-down
+.PHONY: up down test lint format demo demo-all rehearsal latency-measure activation-measure stack-up stack-down
 
 up:
 	docker compose up
@@ -81,9 +81,21 @@ rehearsal:
 	        sleep $(REHEARSAL_GAP_SECONDS); \
 	    fi; \
 	done; \
-	uv run python -m demos.scenarios.rehearsal_summary; \
+	uv run python -m demos.scenarios.rehearsal_summary --since $$start; \
 	end=$$(date +%s); \
 	echo ""; echo "Rehearsal finished in $$((end - start))s"
+
+# --- activation measurement -------------------------------------------------
+#
+# `make activation-measure` runs mock_idle (steady state) + fire_ignition
+# (one incident) against the live stack and reports the Layer C/D
+# activation reduction vs running C/D on every frame.
+activation-measure:
+	SCENARIO=fire_ignition docker compose up -d \
+	    redis mosquitto sensing vision fusion vlm agent \
+	    slice_control_mock actuators_mock action console_api
+	@sleep 8
+	uv run python -m demos.latency_harness.activation
 
 # --- latency harness --------------------------------------------------------
 #

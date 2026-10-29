@@ -8,7 +8,10 @@ to read the code.
 
 - **<100 ms gated-path latency** sensor → actuator command (<200 ms in production).
 - **Layers C and D out of the actuator critical path.** Severe events fire
-  on Layer A+B alone via the safety protocol fallback.
+  on Layer A+B alone: the action service's Phase-1 path dispatches the
+  rule-based safety protocol (`shared/protocols/`) straight
+  off the AnomalyScore. Layer D's plan arrives later and only adds actions
+  Phase 1 didn't already fire (dispatched as Phase 2).
 - **All processing on-premise.** No cloud, no third-party model endpoints,
   no customer data leaves the site. PIPA-compliant by construction.
 - **Bounded action library.** The agent selects + parameterizes from a fixed
@@ -71,7 +74,7 @@ to read the code.
 | `axon:sensors`               | sensing   | fusion                     | JSON SensorReading |
 | `axon:detections`            | vision    | fusion                     | JSON VisionDetection |
 | `axon:poses`                 | vision    | fusion                     | JSON PoseObservation |
-| `axon:anomalies`             | fusion    | vlm, console_api           | JSON AnomalyScore  |
+| `axon:anomalies`             | fusion    | vlm, action (Phase 1), console_api | JSON AnomalyScore  |
 | `axon:scenes`                | vlm       | agent, console_api         | JSON SceneDescription |
 | `axon:plans`                 | agent     | action, console_api        | JSON ActionPlan    |
 | `axon:audit`                 | action    | console_api                | JSON AuditEntry    |

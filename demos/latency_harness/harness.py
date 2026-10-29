@@ -1,8 +1,10 @@
 """End-to-end latency harness — 100 synthetic triggers per network mode.
 
 Drives the live stack with one sensor reading at a time, waits for the
-full Layer B → C → D → 4 cascade to complete (six audit entries land on
-`axon:audit`), and records the trigger → last-audit latency. Runs the
+six fire-protocol audit entries to land on `axon:audit` (via the Phase-1
+gated path, or the full Layer B → C → D cascade when the action service
+runs with AXON_PHASE1_ENABLED=false), and records the trigger → last-audit
+latency. Runs the
 same workload through the dispatcher's `urllc` and `wifi` modes.
 
 Prerequisites:
@@ -71,6 +73,16 @@ class TriggerSample:
         if self.last_audit_ts is None:
             return None
         return (self.last_audit_ts - self.publish_ts) * 1000.0
+
+
+async def _phase1_enabled() -> bool | None:
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as http:
+            r = await http.get(f"{ACTION_URL}/health")
+            r.raise_for_status()
+            return r.json().get("phase1_enabled")
+    except httpx.HTTPError:
+        return None
 
 
 async def _set_network_mode(mode: str, base_ms: float, jitter_ms: float) -> None:
@@ -355,7 +367,8 @@ def render_chart(out: Path, samples_by_mode: dict[str, list[float]]) -> None:
                 edgecolor="white")
     ax.set_xlabel("sensor → all-actions-dispatched (ms)")
     ax.set_ylabel("count")
-    ax.set_title("AXON end-to-end latency distribution\n100 synthetic triggers per network mode")
+    ax.set_title("AXON end-to-end latency distribution\n"
+                 + ", ".join(f"{m}: n={len(v)}" for m, v in samples_by_mode.items()))
     ax.legend(loc="upper right")
     ax.grid(True, alpha=0.25)
 
@@ -390,14 +403,33 @@ def render_markdown_report(
     out: Path,
     samples_by_mode: dict[str, list[float]],
     gating_by_mode: dict[str, dict | None] | None = None,
+    *,
+    requested: int,
+    phase1: bool | None,
 ) -> None:
     out.parent.mkdir(parents=True, exist_ok=True)
+    if phase1:
+        path = ("**Gated path** (action service `phase1_enabled=true`): the Phase-1 protocol "
+                "dispatches straight off Layer B's AnomalyScore; Layers C/D run in parallel "
+                "and only dispatch a Phase-2 delta.")
+    elif phase1 is False:
+        path = ("**Full AI chain** (action service `phase1_enabled=false`): every trigger "
+                "waits for Layer B → C → D before dispatch.")
+    else:
+        path = "Dispatch path unknown (action service /health unreachable)."
     lines = ["# AXON Latency Harness Report",
              f"_generated {datetime.now(timezone.utc).isoformat()}_", "",
              "## Setup",
-             "100 synthetic thermal-sensor triggers per mode were injected on",
-             "`axon:sensors`. The full Layer B → C → D → 4 cascade ran for every",
-             "trigger; the harness records sensor-publish → all-six-audits-landed.",
+             f"{requested} synthetic thermal-sensor triggers requested per mode on",
+             "`axon:sensors`; `n` below counts the triggers whose six audits all",
+             "landed. The harness records sensor-publish → all-six-audits-landed,",
+             "so Layer B fusion is inside the measured window (Layer A vision is not:",
+             "the trigger is a sensor reading).",
+             "",
+             path,
+             "",
+             "Layers C/D run as deterministic stubs unless the stack was started",
+             "with AXON_VLM_MODE/AXON_LLM_MODE=vllm.",
              "",
              "## Summary",
              "| mode | n | p50 | p95 | p99 | min | max | mean |",
@@ -485,15 +517,20 @@ async def main() -> int:
     all_samples = [s for samples in by_mode_samples.values() for s in samples]
     write_csv(RESULTS_DIR / "latency.csv", all_samples)
     by_mode_ms: dict[str, list[float]] = {
-        mode: [s.last_audit_ms for s in samples if s.last_audit_ms is not None]
+        # Only triggers whose full six-action protocol was audited count toward n.
+        mode: [s.last_audit_ms for s in samples
+               if s.last_audit_ms is not None and s.audit_count >= EXPECTED_AUDITS_PER_TRIGGER]
         for mode, samples in by_mode_samples.items()
     }
     render_chart(RESULTS_DIR / "latency.png", by_mode_ms)
-    render_markdown_report(RESULTS_DIR / "REPORT.md", by_mode_ms, by_mode_gating)
+    render_markdown_report(
+        RESULTS_DIR / "REPORT.md", by_mode_ms, by_mode_gating,
+        requested=args.count, phase1=await _phase1_enabled(),
+    )
 
-    print(f"\nCSV    → {RESULTS_DIR / 'latency.csv'}")
-    print(f"Chart  → {RESULTS_DIR / 'latency.png'}")
-    print(f"Report → {RESULTS_DIR / 'REPORT.md'}")
+    print(f"\nCSV    -> {RESULTS_DIR / 'latency.csv'}")
+    print(f"Chart  -> {RESULTS_DIR / 'latency.png'}")
+    print(f"Report -> {RESULTS_DIR / 'REPORT.md'}")
     for mode, xs in by_mode_ms.items():
         if xs:
             print(f"  {mode}: n={len(xs)} p50={percentile(xs, 50):.1f}ms "

@@ -152,8 +152,10 @@ class FusionEngine:
             trigger_id=trigger_id,
             timestamp=now,
         )
-        await self.bus.publish_anomaly(msg.model_dump(mode="json"))
 
+        # Cache the trigger context BEFORE publishing the anomaly: Layer C
+        # fetches it as soon as it sees the AnomalyScore, and reading it
+        # first left the VLM with no frames, no sensors and location "unknown".
         frame_refs: dict[str, list[str]] = {}
         for cam_id in self._camera_ids:
             frame_refs[cam_id] = await self.bus.latest_frame_entry_ids(cam_id, count=4)
@@ -172,6 +174,7 @@ class FusionEngine:
             frame_refs=frame_refs,
             sensor_refs=sensor_refs,
         )
+        await self.bus.publish_anomaly(msg.model_dump(mode="json"))
 
         self._last_emission_at = now
         self.telemetry.record_activation()

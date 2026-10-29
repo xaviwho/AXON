@@ -8,7 +8,7 @@ different simulated network conditions:
                 (rough stand-in for shared Wi-Fi contention)
 
 Both runs publish a real ActionPlan + 6 audits to the bus. The script
-records each run's plan→all-audits dispatch window and emits a
+records each run's anomaly→all-audits dispatch window (gated path) and emits a
 comparison report.
 
 Validation (per Prompt 9): the Wi-Fi run's window must be ≥ 5× the URLLC
@@ -51,21 +51,23 @@ async def _run_one(mode: str, base_ms: float, jitter_ms: float) -> dict:
 
 
 def _summarize(mode: str, incident: dict) -> dict:
-    plan = incident.get("plan") or {}
+    # Anchored on the AnomalyScore: the reflex path dispatches straight off
+    # Layer B, before Layer D's plan exists.
+    anomaly = incident.get("anomaly") or {}
     audits = incident.get("audits") or []
-    plan_ts = C._ts(plan.get("timestamp"))
-    per_action = [(a["action_id"], (C._ts(a["timestamp"]) - plan_ts) * 1000.0)
-                  for a in audits] if plan_ts is not None else []
+    anom_ts = C._ts(anomaly.get("timestamp"))
+    per_action = [(a["action_id"], (C._ts(a["timestamp"]) - anom_ts) * 1000.0)
+                  for a in audits] if anom_ts is not None else []
     audit_ts = [C._ts(a["timestamp"]) for a in audits]
     first = min(audit_ts) if audit_ts else None
     last  = max(audit_ts) if audit_ts else None
-    window_ms = (last - plan_ts) * 1000.0 if (plan_ts and last) else 0.0
-    first_ms = (first - plan_ts) * 1000.0 if (plan_ts and first) else 0.0
+    window_ms = (last - anom_ts) * 1000.0 if (anom_ts and last) else 0.0
+    first_ms = (first - anom_ts) * 1000.0 if (anom_ts and first) else 0.0
     return {
         "mode": mode,
         "trigger_id": incident["trigger_id"],
-        "plan_to_first_audit_ms": round(first_ms, 1),
-        "plan_to_all_audits_ms":  round(window_ms, 1),
+        "anomaly_to_first_audit_ms": round(first_ms, 1),
+        "anomaly_to_all_audits_ms":  round(window_ms, 1),
         "per_action": [(name, round(ms, 1)) for name, ms in per_action],
         "p50_per_action_ms": round(statistics.median([ms for _, ms in per_action]), 1) if per_action else None,
     }
@@ -75,8 +77,8 @@ def _render(urllc: dict, wifi: dict) -> None:
     out = C.REPORTS_DIR / "wifi_vs_5g.md"
     C.REPORTS_DIR.mkdir(parents=True, exist_ok=True)
 
-    ratio = (wifi["plan_to_all_audits_ms"] / urllc["plan_to_all_audits_ms"]
-             if urllc["plan_to_all_audits_ms"] else 0)
+    ratio = (wifi["anomaly_to_all_audits_ms"] / urllc["anomaly_to_all_audits_ms"]
+             if urllc["anomaly_to_all_audits_ms"] else 0)
 
     lines = []
     lines.append("# AXON Demo Report — Wi-Fi vs URLLC")
@@ -87,17 +89,17 @@ def _render(urllc: dict, wifi: dict) -> None:
     lines.append(f"identical 6-action plan, only the dispatcher's simulated network mode changed.")
     lines.append("")
     lines.append("## Comparison")
-    lines.append("| mode | plan → first audit | plan → all audits | per-action p50 |")
+    lines.append("| mode | anomaly → first audit | anomaly → all audits | per-action p50 |")
     lines.append("|------|-------------------:|------------------:|---------------:|")
     lines.append(
-        f"| URLLC | {urllc['plan_to_first_audit_ms']} ms | "
-        f"{urllc['plan_to_all_audits_ms']} ms | "
+        f"| URLLC | {urllc['anomaly_to_first_audit_ms']} ms | "
+        f"{urllc['anomaly_to_all_audits_ms']} ms | "
         f"{urllc['p50_per_action_ms']} ms |"
     )
     lines.append(
         f"| Wi-Fi (base {WIFI_BASE_MS}ms, jitter {WIFI_JITTER_MS}ms) | "
-        f"{wifi['plan_to_first_audit_ms']} ms | "
-        f"{wifi['plan_to_all_audits_ms']} ms | "
+        f"{wifi['anomaly_to_first_audit_ms']} ms | "
+        f"{wifi['anomaly_to_all_audits_ms']} ms | "
         f"{wifi['p50_per_action_ms']} ms |"
     )
     lines.append("")
@@ -131,10 +133,10 @@ async def main() -> int:
 
     _render(urllc, wifi)
 
-    if urllc["plan_to_all_audits_ms"] <= 0 or wifi["plan_to_all_audits_ms"] <= 0:
+    if urllc["anomaly_to_all_audits_ms"] <= 0 or wifi["anomaly_to_all_audits_ms"] <= 0:
         logger.error("could not measure dispatch latency for both modes")
         return 1
-    ratio = wifi["plan_to_all_audits_ms"] / urllc["plan_to_all_audits_ms"]
+    ratio = wifi["anomaly_to_all_audits_ms"] / urllc["anomaly_to_all_audits_ms"]
     if ratio < 5.0:
         logger.error("Wi-Fi/URLLC ratio {:.1f}× < 5× target", ratio)
         return 1

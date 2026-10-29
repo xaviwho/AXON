@@ -55,3 +55,18 @@ def test_retrieve_ranks_by_hit_count(kb):
 def test_retrieve_limit_respected(kb):
     secs = kb.retrieve(["lab", "fire", "gas", "ppe"], limit=2)
     assert len(secs) <= 2
+
+
+def test_semantic_load_failure_falls_back_to_keyword(monkeypatch, tmp_path):
+    """No model weights (offline site) must degrade to keyword, not crash Layer D."""
+    from services.agent.app import rag
+
+    (tmp_path / "kb.md").write_text("## Fire\nCut power and isolate HVAC.\n", encoding="utf-8")
+
+    def _no_model(name):
+        raise OSError("couldn't connect to huggingface.co")
+
+    monkeypatch.setattr(rag, "_load_model", _no_model)
+    kb = rag.KnowledgeBase.load(tmp_path, backend="semantic")
+    assert kb.backend == "keyword"
+    assert len(kb) == 1
