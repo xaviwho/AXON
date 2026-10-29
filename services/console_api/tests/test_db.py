@@ -13,8 +13,10 @@ NOW = datetime(2026, 5, 15, 12, 0, 0, tzinfo=timezone.utc)
 
 def _audit(i: int, *, action_id="power_cutoff", severity=4, effect="success",
            trigger_id="t-1", offset_s: float = 0) -> dict:
+    # Distinct audits never share a timestamp in practice; +i ms keeps them
+    # distinct here too (identical ones are treated as a bus replay).
     return {
-        "timestamp": (NOW + timedelta(seconds=offset_s)).isoformat(),
+        "timestamp": (NOW + timedelta(seconds=offset_s, milliseconds=i)).isoformat(),
         "trigger_id": trigger_id, "action_id": action_id, "severity": severity,
         "effect": effect, "agent_confidence": 0.9,
         "layer_d_trace": f"trace-{i}", "parameters": {"zone_id": "lab-A"},
@@ -34,6 +36,27 @@ async def test_insert_and_get_audit(db):
     assert row["action_id"] == "power_cutoff"
     assert row["trigger_id"] == "t-1"
     assert row["parameters"] == {"zone_id": "lab-A"}
+
+
+@pytest.mark.asyncio
+async def test_replayed_audit_is_not_duplicated(db):
+    """Console restarts backfill from the bus; the same entry must not land twice."""
+    first = await db.insert_audit(_audit(0))
+    again = await db.insert_audit(_audit(0))
+    assert again == first
+    _rows, total = await db.list_audits()
+    assert total == 1
+
+
+@pytest.mark.asyncio
+async def test_tampered_copy_of_stored_audit_still_lands(db):
+    """Dedupe must not swallow a tampered entry that reuses a real one's identity."""
+    real = _audit(0)
+    await db.insert_audit({**real, "signature": "aa" * 32}, signature_valid=True)
+    tampered = {**real, "signature": "aa" * 32, "parameters": {"zone_id": "lab-Z"}}
+    await db.insert_audit(tampered, signature_valid=False)
+    _rows, total = await db.list_audits()
+    assert total == 2
 
 
 @pytest.mark.asyncio
@@ -121,3 +144,24 @@ async def test_recent_incidents_ordered_by_time(db):
         })
     rows = await db.recent_incidents(limit=10)
     assert [r["trigger_id"] for r in rows] == ["t-2", "t-1", "t-0"]
+
+
+def test_opens_legacy_db_without_signature_columns(tmp_path):
+    """A console.db created before signed audits must migrate, not crash startup."""
+    import sqlite3
+
+    path = tmp_path / "legacy.db"
+    conn = sqlite3.connect(str(path))
+    conn.executescript("""
+        CREATE TABLE audit_entries (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp TEXT NOT NULL,
+            trigger_id TEXT, action_id TEXT NOT NULL, severity INTEGER NOT NULL,
+            effect TEXT NOT NULL, agent_confidence REAL NOT NULL,
+            layer_d_trace TEXT NOT NULL, parameters_json TEXT, latency_ms REAL
+        );
+    """)
+    conn.close()
+
+    db = AuditDB(path)
+    cols = {r[1] for r in db._conn.execute("PRAGMA table_info(audit_entries)")}
+    assert {"phase", "signature_hex", "signature_valid"} <= cols

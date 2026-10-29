@@ -18,5 +18,13 @@ class ActionSettings(BaseSettings):
     # per-service queue limit on concurrent plans.
     max_concurrent_plans: int = 5
 
+    # Zone the Phase-1 gated protocol targets. AnomalyScore has no location
+    # field yet; this matches the single-lab default Layer C reports.
+    phase1_zone: str = "lab-A"
+
+    # AXON_PHASE1_ENABLED=false disables the gated path so the latency
+    # harness can measure the full B → C → D chain for comparison.
+    phase1_enabled: bool = True
+
 
 settings = ActionSettings()

@@ -45,7 +45,7 @@ async def main() -> int:
         except Exception as exc:    # noqa: BLE001
             print(f"could not load {DASHBOARD_URL}: {exc}", file=sys.stderr)
             return 2
-        print(f"recording {DASHBOARD_URL} for {DURATION_S}s → {OUTPUT_FILE}", flush=True)
+        print(f"recording {DASHBOARD_URL} for {DURATION_S}s -> {OUTPUT_FILE}", flush=True)
         await page.wait_for_timeout(int(DURATION_S * 1000))
 
         video = page.video

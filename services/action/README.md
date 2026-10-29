@@ -1,9 +1,23 @@
 # axon-action (Layer 4 dispatcher)
 
-The action dispatcher. Subscribes to `axon:plans`, fans out every
-`ActionInvocation` in parallel via `asyncio.gather` to per-action
-handlers, and writes a per-action `AuditEntry` to `axon:audit` for the
-console (Prompt 8) to persist.
+The action dispatcher. Subscribes to `axon:anomalies` and `axon:plans`,
+fans out every `ActionInvocation` in parallel via `asyncio.gather` to
+per-action handlers, and writes a signed per-action `AuditEntry` to
+`axon:audit` for the console (Prompt 8) to persist.
+
+## Two-phase dispatch (gated path)
+
+- **Phase 1** — on every AnomalyScore, the rule-based protocol from
+  `shared/protocols/` fires immediately. Layers C/D are not on the
+  actuator path. Audits carry `phase=1`.
+- **Phase 2** — when Layer D's plan for the same `trigger_id` arrives, only
+  actions not already fired (canonical `action_id` + parameters key) are
+  dispatched, with `phase=2`.
+
+| Env | Default | Purpose |
+|-----|---------|---------|
+| `AXON_PHASE1_ZONE` | `lab-A` | Zone Phase 1 targets. Must match the location Layer C reports, or Phase 2's keys never match and every action fires twice. |
+| `AXON_PHASE1_ENABLED` | `true` | `false` disables Phase 1 so the latency harness can measure the full B → C → D chain. |
 
 ## Handlers
 

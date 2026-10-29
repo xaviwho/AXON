@@ -19,7 +19,8 @@ Three scenarios, in this order:
 3. **Wi-Fi vs URLLC Comparison** — same fire-protocol workload, twice:
    once through the URLLC path (no extra delay), once through a simulated
    Wi-Fi path (≥150 ms base + ≤100 ms jitter per action). The dashboard
-   shows the dispatch window jumping ~10×.
+   shows the dispatch window jumping ~10× (12.4× in the Oct 29 rehearsal;
+   15× at p50 over 100 triggers in the latency harness).
 
 ## Hardware inventory (pre-flight)
 
@@ -37,10 +38,14 @@ Three scenarios, in this order:
 
 ```bash
 # 1. From the repo root, verify everything builds and tests pass
-make test                                                  # 165 tests, ~2 s
+make test                                                  # 208 tests
 
 # 2. Build the full stack (clean cache OK; warm cache faster)
-docker compose build                                       # ~3 min cold
+docker compose build                                       # ~3 min warm, ~15 min cold
+
+# 2b. Start from a clean bus: the latency harness leaves thousands of
+#     entries on the Redis streams (Redis is runtime-only; nothing is lost)
+docker compose up -d redis && docker exec axon-redis redis-cli flushall
 
 # 3. Bring up the stack pointed at the fire_ignition scenario
 SCENARIO=fire_ignition docker compose up -d \
@@ -60,6 +65,20 @@ cd frontend && VITE_API_BASE=http://localhost:8008 \
 # 6. Open http://localhost:5173 in the demo browser — service grid
 #    should show 8 green tiles, slice chart at 5/5/5
 ```
+
+### Windows demo laptop (no `make`)
+
+Run everything from **Git Bash** with `uv` on the PATH:
+
+```bash
+export PYTHONIOENCODING=utf-8                 # console can't print "→" otherwise
+uv run pytest                                 # instead of make test
+bash demos/scenarios/rehearsal.sh             # instead of make rehearsal
+bash demos/scenarios/rehearsal.sh fire_ignition   # one scenario (instead of make demo)
+```
+
+The demo scripts switch asyncio to the selector event loop on Windows
+automatically (the MQTT client needs it).
 
 ## Running the demo
 
@@ -108,13 +127,13 @@ Each is ≤90 s, includes title cards and the latency overlay.
 These are the numbers judges and EHS officers want to see. Have them
 visible on the dashboard:
 
-| Path | Target | Typical (this dev box) |
+| Path | Target | Measured (this dev box, n = 100) |
 |------|--------|------------------------|
-| Sensor → AnomalyScore (fusion gate) | <200 ms | 2–5 ms |
-| AnomalyScore → ActionPlan (out of critical path) | <2 s | 5–15 ms (stub) |
-| Plan → all actions dispatched, URLLC | <50 ms | 20–30 ms |
-| Plan → all actions dispatched, Wi-Fi | (uncommitted) | 240+ ms |
-| **End-to-end gated path, URLLC** | **<100 ms** | **~50 ms** |
+| **Sensor → all actuator audits, gated path, URLLC** | **<100 ms** | **p50 17 ms / p99 26 ms** |
+| Same, simulated Wi-Fi | (uncommitted) | p50 260 ms / p99 435 ms |
+| Same, full B → C → D chain (Phase 1 off) | — | p50 142 ms / p99 474 ms |
+| AnomalyScore → ActionPlan (out of critical path) | <2 s | ~6 ms (stub) |
+| Layer C/D activation reduction | ≥90% | 99.8% |
 
 Production hardware (RTX 4090 + real Qwen2-VL / Llama) will sit closer
 to: vision <15 ms, vlm 0.6–0.9 s, agent <1 s, dispatch unchanged.
@@ -147,9 +166,13 @@ with `MAXLEN ~ 10 000`. Production swap is PostgreSQL with append-only
 WAL + signed entries. Out of scope for the contest demo.
 
 **Q: What if Layer C is slow / down?**
-Layers C and D are out of the actuator critical path by design. The
-fallback protocol mapped to the trigger reason fires regardless. The
-dashboard's "fallback=true" badge appears on plans built that way.
+Layers C and D are out of the actuator critical path by design. For
+fire, gas and person-down triggers the action service's Phase-1 path
+dispatches the safety protocol straight off Layer B's AnomalyScore —
+it never waits for C or D. Their plan arrives afterwards, adds any
+extra actions, and supplies the reasoning trace in the incident view.
+If Layer D returns invalid output, the agent's own fallback protocol
+takes over ("fallback=true" badge on the plan).
 
 **Q: How long to deploy at a new site?**
 Bring-up is ~3 minutes (mostly docker compose pull). Per-site

@@ -346,16 +346,19 @@ def render_report(
         event_log_lines.append(f"| +{(t - t0) * 1000:.1f} | {layer} | {descr} |")
 
     # per-stage latencies
-    lat_lines = ["| stage | latency |", "|-------|---------|"]
-    if anomaly.get("timestamp") and scene.get("timestamp"):
-        lat_lines.append(f"| anomaly → scene | {(_ts(scene['timestamp']) - _ts(anomaly['timestamp'])) * 1000:.1f} ms |")
-    if scene.get("timestamp") and plan.get("timestamp"):
-        lat_lines.append(f"| scene → plan    | {(_ts(plan['timestamp']) - _ts(scene['timestamp'])) * 1000:.1f} ms |")
-    if plan.get("timestamp") and audits:
+    # Anchored on the AnomalyScore: Phase-1 audits land before Layer D's
+    # plan exists, so plan-anchored spans would be negative.
+    lat_lines = ["| stage | path | latency |", "|-------|------|---------|"]
+    if anomaly.get("timestamp") and audits:
+        anom_ts = _ts(anomaly["timestamp"])
         first_a = min(_ts(a['timestamp']) for a in audits)
         last_a  = max(_ts(a['timestamp']) for a in audits)
-        lat_lines.append(f"| plan → first audit | {(first_a - _ts(plan['timestamp'])) * 1000:.1f} ms |")
-        lat_lines.append(f"| plan → all audits  | {(last_a - _ts(plan['timestamp'])) * 1000:.1f} ms |")
+        lat_lines.append(f"| anomaly → first audit | gated (actuator) | {(first_a - anom_ts) * 1000:.1f} ms |")
+        lat_lines.append(f"| anomaly → all audits  | gated (actuator) | {(last_a - anom_ts) * 1000:.1f} ms |")
+    if anomaly.get("timestamp") and scene.get("timestamp"):
+        lat_lines.append(f"| anomaly → scene (Layer C) | enrichment | {(_ts(scene['timestamp']) - _ts(anomaly['timestamp'])) * 1000:.1f} ms |")
+    if scene.get("timestamp") and plan.get("timestamp"):
+        lat_lines.append(f"| scene → plan (Layer D)    | enrichment | {(_ts(plan['timestamp']) - _ts(scene['timestamp'])) * 1000:.1f} ms |")
 
     audit_table = ["| time | action | effect | latency |",
                    "|------|--------|--------|---------|"]

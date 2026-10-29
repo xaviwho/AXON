@@ -38,7 +38,6 @@ CREATE TABLE IF NOT EXISTS audit_entries (
 CREATE INDEX IF NOT EXISTS idx_audit_trigger ON audit_entries(trigger_id);
 CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON audit_entries(timestamp);
 CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_entries(action_id);
-CREATE INDEX IF NOT EXISTS idx_audit_signature_valid ON audit_entries(signature_valid);
 
 CREATE TABLE IF NOT EXISTS anomalies (
     trigger_id            TEXT PRIMARY KEY,
@@ -81,6 +80,12 @@ class AuditDB:
         self._conn.row_factory = sqlite3.Row
         self._conn.executescript(_SCHEMA)
         self._migrate_audit_columns()
+        # Indexes on migrated columns must come after the migration: in
+        # _SCHEMA they crash startup on a legacy DB ("no such column").
+        self._conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_audit_signature_valid "
+            "ON audit_entries(signature_valid)"
+        )
         logger.info("audit DB ready at {}", path)
 
     def _migrate_audit_columns(self) -> None:
@@ -115,7 +120,28 @@ class AuditDB:
     async def insert_audit(
         self, e: dict[str, Any], *, signature_valid: bool = False,
     ) -> int:
+        """Append one audit row; an exact replay of a stored entry is a no-op.
+
+        The persister backfills from the bus on every restart, so the same
+        AuditEntry can arrive twice. Only a byte-for-byte replay is skipped
+        (signature included) — a tampered copy still lands, flagged invalid.
+        Returns the row id, existing or new.
+        """
+        params_json = json.dumps(e.get("parameters") or {})
+        phase = int(e.get("phase") or 1)
         async with self._lock:
+            existing = self._conn.execute(
+                """
+                SELECT id FROM audit_entries
+                WHERE trigger_id IS ? AND action_id = ? AND timestamp = ?
+                  AND signature_hex IS ? AND parameters_json = ? AND effect = ?
+                  AND phase = ?
+                """,
+                (e.get("trigger_id"), e["action_id"], e["timestamp"],
+                 e.get("signature"), params_json, e["effect"], phase),
+            ).fetchone()
+            if existing is not None:
+                return int(existing["id"])
             cur = self._conn.execute(
                 """
                 INSERT INTO audit_entries (
@@ -127,8 +153,8 @@ class AuditDB:
                 (
                     e["timestamp"], e.get("trigger_id"), e["action_id"], e["severity"],
                     e["effect"], e["agent_confidence"], e["layer_d_trace"],
-                    json.dumps(e.get("parameters") or {}), e.get("latency_ms"),
-                    int(e.get("phase") or 1),
+                    params_json, e.get("latency_ms"),
+                    phase,
                     e.get("signature"),
                     1 if signature_valid else 0,
                 ),

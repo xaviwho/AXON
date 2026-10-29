@@ -64,7 +64,7 @@ AXON turns private 5G networks and existing IoT infrastructure into autonomous s
 - `make demo SCENARIO=medical_emergency` — run a single scenario end-to-end (validates + writes a markdown report)
 - `make rehearsal` — runs all three scenarios back-to-back with 30s gaps + combined REHEARSAL.md
 - `make latency-measure` — drives 100 sensor → audit pairings per network mode; produces CSV + matplotlib chart
-- `make test` — full pytest suite (~165 tests, ~2s)
+- `make test` — full pytest suite (208 tests; the 5 semantic-RAG tests download MiniLM on first run)
 - `docker compose up` — manual bring-up of every service
 
 ## Definition of "done" for the MVP
@@ -78,4 +78,8 @@ Documented here so this file remains the source-of-truth one-pager:
 - **Network-mode admin endpoint.** `POST /admin/network` on the action service flips the dispatcher's per-handler delay between `urllc` (no-op) and `wifi` (`base_ms + U(0, jitter_ms)`). Used by the Wi-Fi vs URLLC comparison demo + latency harness.
 - **Cooldown override.** `AXON_COOLDOWN_OVERRIDE_SECONDS` lets the latency harness bypass the production 10s emission cooldown without editing rules.yaml.
 - **Stub LLMs in dev.** Both `vlm` and `agent` run deterministic stubs by default on hardware that can't host the production models; `AXON_VLM_MODE=vllm` and `AXON_LLM_MODE=vllm` swap to vLLM-served Qwen2-VL-7B-Instruct-AWQ and Llama-3.1-8B-Instruct respectively.
+- **Two-phase dispatcher (gated path).** The action service consumes `axon:anomalies` and fires the rule-based protocol (`shared/protocols/`) as Phase 1 the moment Layer B emits; Layer D's plan on `axon:plans` dispatches only the delta as Phase 2 (canonical `action_id` + params key). Phase 1 targets `AXON_PHASE1_ZONE` (default `lab-A`, the same single-lab default Layer C reports) — it must match the scene location or Phase 2 re-fires everything. `AXON_PHASE1_ENABLED=false` restores the full B → C → D chain for latency comparison. Demo validation and reports anchor latency on the AnomalyScore, not the plan.
+- **Fusion caches trigger context before publishing the AnomalyScore.** Layer C reads the context as soon as it sees the anomaly; the reverse order left scenes with no frames, no sensors and location `unknown`.
+- **Console backfill is non-blocking and replay-safe.** It runs in the persister task (newest 500 entries per stream); `insert_audit` skips exact replays (signature included) so restarts don't duplicate audit rows, while tampered copies still land flagged invalid.
+- **Windows dev box.** No `make`: use Git Bash, `bash demos/scenarios/rehearsal.sh`, and `PYTHONIOENCODING=utf-8`. The demo scripts switch asyncio to the selector loop on Windows (aiomqtt needs it).
 - **Vision custom classes deferred.** `fire`, `smoke`, `ppe_compliant`, `ppe_violation`, `equipment_in_use` are not in pretrained YOLOv10 — fine-tuning sprint is post-MVP. Until then, fire detection rides the thermal-sensor rule, and the `fire_smoke_vision` rule is dormant.

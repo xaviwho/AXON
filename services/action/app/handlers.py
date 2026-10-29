@@ -57,7 +57,7 @@ def _timed_outcome(
     return ActionOutcome(
         invocation=inv,
         effect=effect,
-        latency_ms=(time.monotonic() - start) * 1000.0,
+        latency_ms=(time.perf_counter() - start) * 1000.0,
         detail=detail,
     )
 
@@ -66,7 +66,7 @@ def _timed_outcome(
 
 
 async def handle_power_cutoff(ctx: HandlerContext, inv: ActionInvocation) -> ActionOutcome:
-    start = time.monotonic()
+    start = time.perf_counter()
     eff, det = await _http_post(
         ctx, f"{ctx.actuators_url}/equipment/power_cutoff", inv.parameters,
     )
@@ -74,7 +74,7 @@ async def handle_power_cutoff(ctx: HandlerContext, inv: ActionInvocation) -> Act
 
 
 async def handle_door_lock(ctx: HandlerContext, inv: ActionInvocation) -> ActionOutcome:
-    start = time.monotonic()
+    start = time.perf_counter()
     eff, det = await _http_post(
         ctx, f"{ctx.actuators_url}/door/lock", inv.parameters,
     )
@@ -82,7 +82,7 @@ async def handle_door_lock(ctx: HandlerContext, inv: ActionInvocation) -> Action
 
 
 async def handle_door_unlock(ctx: HandlerContext, inv: ActionInvocation) -> ActionOutcome:
-    start = time.monotonic()
+    start = time.perf_counter()
     eff, det = await _http_post(
         ctx, f"{ctx.actuators_url}/door/unlock", inv.parameters,
     )
@@ -90,7 +90,7 @@ async def handle_door_unlock(ctx: HandlerContext, inv: ActionInvocation) -> Acti
 
 
 async def handle_hvac_isolate(ctx: HandlerContext, inv: ActionInvocation) -> ActionOutcome:
-    start = time.monotonic()
+    start = time.perf_counter()
     eff, det = await _http_post(
         ctx, f"{ctx.actuators_url}/hvac/isolate", inv.parameters,
     )
@@ -101,7 +101,7 @@ async def handle_hvac_isolate(ctx: HandlerContext, inv: ActionInvocation) -> Act
 
 
 async def handle_slice_reshape(ctx: HandlerContext, inv: ActionInvocation) -> ActionOutcome:
-    start = time.monotonic()
+    start = time.perf_counter()
     slices = inv.parameters.get("slices") or []
     detail_lines: list[str] = []
     overall = ActionEffect.SUCCESS
@@ -135,7 +135,7 @@ async def handle_slice_reshape(ctx: HandlerContext, inv: ActionInvocation) -> Ac
 
 async def handle_notify_responders(ctx: HandlerContext, inv: ActionInvocation) -> ActionOutcome:
     """MVP behavior: log + audit. Production: SMS/Slack/PagerDuty fan-out."""
-    start = time.monotonic()
+    start = time.perf_counter()
     targets = inv.parameters.get("targets") or []
     severity = inv.parameters.get("severity")
     message = inv.parameters.get("message", "")
@@ -149,7 +149,7 @@ async def handle_notify_responders(ctx: HandlerContext, inv: ActionInvocation) -
 
 async def handle_display_alert(ctx: HandlerContext, inv: ActionInvocation) -> ActionOutcome:
     """Publish an alert event on the bus; console_api (Prompt 8) tails this."""
-    start = time.monotonic()
+    start = time.perf_counter()
     payload = {
         "trigger_id": ctx.plan.trigger_id,
         "severity": inv.parameters.get("severity"),
@@ -167,7 +167,7 @@ async def handle_video_stream_to_responder(
     ctx: HandlerContext, inv: ActionInvocation
 ) -> ActionOutcome:
     """MVP behavior: log + audit. Production: open a WebRTC session."""
-    start = time.monotonic()
+    start = time.perf_counter()
     logger.info(
         "[video_stream_to_responder] camera_id={} responder_id={}",
         inv.parameters.get("camera_id"),

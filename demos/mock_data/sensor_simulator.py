@@ -22,6 +22,7 @@ import argparse
 import asyncio
 import json
 import random
+import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -32,6 +33,12 @@ import yaml
 from loguru import logger
 
 from shared.schemas.enums import SensorType
+
+if sys.platform == "win32":
+    # aiomqtt needs loop.add_reader/add_writer, which Windows' default
+    # Proactor loop lacks. Every demo entrypoint imports this module before
+    # asyncio.run(), so the policy is in place when the loop is created.
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 DEFAULT_BASELINES: dict[SensorType, tuple[float, float, str]] = {
     SensorType.GAS: (0.2, 0.05, "ppm"),

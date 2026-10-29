@@ -27,16 +27,25 @@ priorities mid-incident. The action layer closes the loop back into connectivity
 
 ## Measured on this dev box (CPU, stub LLMs, no GPU)
 
-| Path | Latency |
-|------|--------:|
-| Sensor reading → AnomalyScore | **2–5 ms** |
-| AnomalyScore → SceneDescription | **5–15 ms** |
-| SceneDescription → ActionPlan | **3–8 ms** |
-| Plan → all 6 actions dispatched (URLLC) | **20–30 ms** |
-| Plan → all 6 actions dispatched (simulated Wi-Fi) | **240+ ms** |
+Latency harness, n = 100 triggers per mode, sensor publish → all six fire-protocol
+audits landed ([REPORT.md](demos/latency_harness/results/REPORT.md)):
 
-Production targets are <100 ms total for the gated path on RTX-class hardware; we hit that
-comfortably on this dev box with the stub models in the loop.
+| Path | p50 | p95 | p99 |
+|------|----:|----:|----:|
+| **Gated path (Phase 1), URLLC** | **17.2 ms** | **23.2 ms** | **25.7 ms** |
+| Gated path (Phase 1), simulated Wi-Fi | 260.0 ms | 393.6 ms | 434.9 ms |
+| Full B → C → D chain, URLLC (`AXON_PHASE1_ENABLED=false`) | 141.6 ms | 351.0 ms | 473.9 ms |
+
+The gated path dispatches actuators straight off Layer B; Layers C/D run in parallel and
+only enrich the audit trail. Even with stub models (Layer D still runs MiniLM semantic RAG),
+waiting on C/D costs ~18× at p99 ([full_chain/REPORT.md](demos/latency_harness/results/full_chain/REPORT.md)).
+
+Layer C/D activation: 0 activations in 60 s idle, 1 in a 60 s fire incident — a 99.8%
+reduction vs. running C/D on every Layer A frame
+([ACTIVATION.md](demos/latency_harness/results/ACTIVATION.md)). On this CPU-only box Layer A
+processes ~4–5 fps; 15–30 fps is the GPU target.
+
+Production target is <100 ms on the gated path (<200 ms in production).
 
 ## Layout
 
@@ -85,7 +94,7 @@ make latency-measure
 
 ### Tests
 ```bash
-make test     # ~165 tests across all services + shared schemas
+make test     # 208 tests across all services + shared schemas
 ```
 
 ## Production swap-points (documented, not implemented)

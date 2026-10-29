@@ -82,11 +82,15 @@ class BusPersister:
 
     async def start(self) -> None:
         self._stop.clear()
-        # Backfill recent history so the dashboard isn't blank after a
-        # cold-start. We use start_id="0" (entire stream) one time for each
-        # tailed stream.
+        # Backfill runs inside the background task, not before it: on a full
+        # bus it is thousands of SQLite writes, and blocking startup on it
+        # left the API unreachable for minutes.
+        self._task = asyncio.create_task(self._backfill_then_run(), name="console-persister")
+
+    async def _backfill_then_run(self) -> None:
+        # Backfill recent history so the dashboard isn't blank after a cold start.
         await self._backfill()
-        self._task = asyncio.create_task(self._run(), name="console-persister")
+        await self._run()
 
     async def stop(self) -> None:
         self._stop.set()
@@ -107,12 +111,17 @@ class BusPersister:
 
         for stream in (ANOMALY_STREAM, SCENE_STREAM, PLAN_STREAM, AUDIT_STREAM):
             try:
-                items = await self._bus._client.xrange(stream, count=500)   # noqa: SLF001
+                # Newest 500, replayed oldest-first (xrange from "-" would
+                # return the oldest entries instead).
+                items = await self._bus._client.xrevrange(stream, count=500)   # noqa: SLF001
             except Exception as exc:    # noqa: BLE001
                 logger.warning("backfill {} failed: {}", stream, exc)
                 continue
-            for _id, fields in items:
+            for _id, fields in reversed(items):
+                if self._stop.is_set():
+                    return
                 await self._handle(stream, fields)
+        logger.info("console backfill complete")
 
     async def _run(self) -> None:
         logger.info("console persister running — tailing audit/anomaly/scene/plan/alert")

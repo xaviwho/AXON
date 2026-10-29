@@ -27,6 +27,8 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
+from loguru import logger
+
 _DEFAULT_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 
 
@@ -98,14 +100,23 @@ class KnowledgeBase:
         if backend != "semantic" or not sections:
             return cls(sections, backend=backend if backend == "keyword" else "semantic")
 
-        import faiss    # noqa: PLC0415 — local import keeps keyword-only paths lightweight
+        try:
+            import faiss    # noqa: PLC0415 — local import keeps keyword-only paths lightweight
 
-        model = _load_model(model_name)
-        vecs = model.encode(
-            [f"{s.heading}\n{s.body}" for s in sections],
-            normalize_embeddings=True,
-            convert_to_numpy=True,
-        ).astype("float32")
+            model = _load_model(model_name)
+            vecs = model.encode(
+                [f"{s.heading}\n{s.body}" for s in sections],
+                normalize_embeddings=True,
+                convert_to_numpy=True,
+            ).astype("float32")
+        except Exception as exc:    # noqa: BLE001 — fail safe, never crash the agent
+            # Missing model weights (offline site, no baked cache) must not take
+            # Layer D down: degrade to keyword retrieval and keep planning.
+            logger.warning(
+                "semantic RAG unavailable ({}: {}); falling back to keyword backend",
+                type(exc).__name__, exc,
+            )
+            return cls(sections, backend="keyword")
         index = faiss.IndexFlatIP(vecs.shape[1])
         index.add(vecs)
         return cls(sections, backend="semantic", model=model, index=index)
